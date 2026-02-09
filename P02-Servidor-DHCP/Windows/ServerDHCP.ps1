@@ -19,7 +19,7 @@ function Check-Service {
 function Mostrar-Menu {
     Clear-Host
     Write-Host "================================================" -ForegroundColor Yellow
-    Write-Host "   GESTOR DHCP TIPO DEBIAN (WINDOWS SERVER)    " -ForegroundColor Yellow
+    Write-Host "   GESTOR DHCP  " -ForegroundColor Yellow
     Write-Host "================================================" -ForegroundColor Yellow
     Write-Host "1) Configurar Servidor (IP Fija, Ámbito, etc.)"
     Write-Host "2) Consultar Estado y Ámbitos"
