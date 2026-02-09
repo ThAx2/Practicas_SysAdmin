@@ -1,3 +1,5 @@
+# IP FIJA 
+
 #!/bin/bash
 source ./Validar_Red.sh
 source ./mon_service.sh
@@ -17,7 +19,7 @@ echo -e "\nResumen: Red $base_ip, Rango $ip_i - $ip_f"
 read -p "¿Deseas aplicar la configuración? (s/n): " respuesta
 
 if [[ $respuesta =~ "s" ]]; then
-    # Creamos la configuración
+    # Generar el archivo de configuración (Lo que ya tienes)
     cat <<EOF > /etc/dhcp/dhcpd.conf
 subnet $base_ip netmask $mask {
     range $ip_i $ip_f;
@@ -27,14 +29,17 @@ subnet $base_ip netmask $mask {
     max-lease-time 7200;
 }
 EOF
-    # Validamos sintaxis con ruta completa para Debian
-    /usr/sbin/dhcpd -t -cf /etc/dhcp/dhcpd.conf
+#OCUPAS TENER ESTÉ APARTADO, 
+   echo 'INTERFACESv4="enp0s3"' > /etc/default/isc-dhcp-server
+systemctl restart $servicio
     
-    # Reiniciamos ahora que ya hay configuración
-    systemctl restart $servicio
-    echo "Servidor DHCP configurado y reiniciado."
+    if systemctl is-active --quiet $servicio; then
+        echo "¡SERVICIO ACTIVO Y FUNCIONANDO!"
+    else
+        echo "Error: Revisa 'journalctl -u isc-dhcp-server' para ver el detalle final"
+    fi
 else
-    echo "Saliendo sin cambios."
+    echo "Saliendo."
     exit
 fi
 
