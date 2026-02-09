@@ -8,28 +8,40 @@
 # Parametros = $1 - Nombre del servicio (Por ejemplo ssh, isc-dhcp-server, mysql...)
 # ===========================================================================	
 mon_service(){
-    local servicio=$1
-    echo -e "============================================"
-    echo -e "Script monitoreo de servicios\n"
-    echo "Monitoreando servicio: $servicio"
-  until systemctl is-active --quiet $servicio
-    do
-        if systemctl list-unit-files --type=service | grep -q $servicio; then
-            echo "El servicio $servicio está desactivado. Intentando prender..."
-            systemctl start $servicio 2>/dev/null
-            sleep 1
-            
-            if [ $? -ne 0 ]; then
-                echo "Aviso: El servicio requiere configuración previa para iniciar. Continuando..."
-                break
-            fi
-        else
-            echo "El servicio $servicio no se encuentra. Instalando..."
-            apt update > /dev/null 2>&1
-            apt install -y $servicio > /dev/null 2>&1
-            echo "Instalación terminada."
-            break 
+local servicio=$1;
+echo -e "============================================"
+echo -e "Script monitoreo de servicios";
+
+echo " ";
+echo "Monitoreando servicio: $servicio";
+
+until systemctl is-active --quiet $servicio
+do
+    if systemctl is-active --quiet $servicio; then
+        echo "El servicio se encuentra activo"
+    
+    elif dpkg -l | grep -q $servicio; then
+        echo "El servicio $servicio esta desactivado."
+        echo "Intentando prender servicio..."
+        
+        systemctl start $servicio 2>/dev/null
+        sleep 2
+        
+        
+        if ! systemctl is-active --quiet $servicio; then
+            echo "El servicio requiere configuración para arrancar. Continuando..."
+            break
         fi
-    done
-    echo "Estado: El servicio $servicio ha sido procesado.";
+
+    else
+        echo "El servicio $servicio no se encuentra."
+        echo "Instalando..."
+        apt-get update > /dev/null 2>&1
+        apt-get install -y $servicio > /dev/null 2>&1
+        systemctl start $servicio > /dev/null 2>&1
+        
+        break 
+    fi
+done
+echo "Estado actual: El servicio $servicio ha sido procesado.";
 }
