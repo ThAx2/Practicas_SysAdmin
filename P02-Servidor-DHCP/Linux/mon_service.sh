@@ -14,23 +14,29 @@ echo -e "Script monitoreo de servicios";
 
 echo " ";
 echo "Monitoreando servicio: $servicio";
+
 until systemctl is-active --quiet $servicio
 do
     if systemctl is-active --quiet $servicio; then
         echo "EL servicio se encuentra activo"
-    elif systemctl list-units --type=service | grep -q $servicio; then
+    elif systemctl list-unit-files --type=service | grep -q $servicio; then
         echo "EL servicio $servicio esta desactivado."
         echo "Prendiendo servicio..."
         systemctl start $servicio
-        sleep 1    
+        sleep 1
+        
+        if [ $? -ne 0 ]; then
+            echo "Aviso: El servicio se activará totalmente tras la configuración."
+            break
+        fi
     else
         echo "EL servicio $servicio no se encuentra."
-        sudo apt update > /dev/null 2>&1
-        sudo apt install -y $servicio > /dev/null 2>&1
+        echo "Instalando..."
+        apt update > /dev/null 2>&1
+        apt install -y $servicio > /dev/null 2>&1
+        systemctl start $servicio > /dev/null 2>&1
         break 
     fi
 done
-echo "El servicio $servicio está activo";
+echo "Estado actual: El servicio $servicio está procesado";
 }
-
-
