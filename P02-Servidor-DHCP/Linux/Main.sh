@@ -1,26 +1,63 @@
-# IP FIJA 
-
 #!/bin/bash
 source ./Validar_Red.sh
 source ./mon_service.sh
 servicio="isc-dhcp-server"
+configurar_dhcp() {
+    base_ip=""; mask=""; ip_i=""; ip_f=""; lease_time=""; gateway=""; dns_server=""; scope=""
 
-mon_service $servicio
-read -p "Nombre del Ámbito: " scope
-until valid_ip "$base_ip"; do read -p "Dirección de Red (ej. 192.168.100.0): " base_ip; done
-read -p "Máscara de Subred: " mask
-until valid_ip "$ip_i"; do read -p "Rango inicial: " ip_i; done
-until valid_ip "$ip_f" "$ip_i"; do read -p "Rango final: " ip_f; done
-read -p "Tiempo de concesión: " lease_time
-until valid_ip "$gateway"; do read -p "Puerta de enlace: " gateway; done 
-until valid_ip "$dns_server"; do read -p "Servidor DNS: " dns_server; done
+    mon_service $servicio
+        read -p "Nombre del Ámbito: " scope
+    while [[ -z "$scope" ]]; do
+        echo "Error: El nombre no puede estar vacío."
+        read -p "Nombre del Ámbito: " scope
+    done
 
-echo -e "\nResumen: Red $base_ip, Rango $ip_i - $ip_f"
-read -p "¿Deseas aplicar la configuración? (s/n): " respuesta
+    while true; do
+        read -p "Dirección de Red (ej. 192.168.100.0): " base_ip
+        valid_ip "$base_ip" && break
+    done
 
-if [[ $respuesta =~ "s" ]]; then
-    # Generar el archivo de configuración (Lo que ya tienes)
-    cat <<EOF > /etc/dhcp/dhcpd.conf
+    while true; do
+        read -p "Máscara de Subred (ej. 255.255.255.0): " mask
+        valid_ip "$mask" && break
+    done
+while true; do
+        read -p "Rango inicial: " ip_i
+        valid_ip "$ip_i" && break
+    done
+
+    while true; do
+        read -p "Rango final: " ip_f
+        valid_ip "$ip_f" "$ip_i" && break
+    done
+
+    while true; do
+        read -p "Tiempo de concesión (segundos): " lease_time
+        if [[ $lease_time =~ ^[0-9]+$ ]]; then break; fi
+        echo "Error: Debe ser un valor numérico."
+    done
+
+    while true; do
+        read -p "Puerta de enlace: " gateway
+        valid_ip "$gateway" && break
+    done 
+
+    while true; do
+        read -p "Servidor DNS: " dns_server
+        valid_ip "$dns_server" && break
+    done
+
+    echo -e "\n========================================"
+    echo "       RESUMEN DE CONFIGURACIÓN"
+    echo "========================================"
+    echo "Red: $base_ip | Máscara: $mask"
+    echo "Rango: $ip_i - $ip_f"
+    echo "Gateway: $gateway | DNS: $dns_server"
+    echo "========================================"
+    read -p "¿Deseas aplicar la configuración? (s/n): " respuesta
+
+    if [[ $respuesta =~ ^[Ss]$ ]]; then
+        cat <<EOF > /etc/dhcp/dhcpd.conf
 subnet $base_ip netmask $mask {
     range $ip_i $ip_f;
     option routers $gateway;
@@ -29,39 +66,45 @@ subnet $base_ip netmask $mask {
     max-lease-time 7200;
 }
 EOF
-#OCUPAS TENER ESTÉ APARTADO, 
-   echo 'INTERFACESv4="enp0s3"' > /etc/default/isc-dhcp-server
-systemctl restart $servicio
-    
-    if systemctl is-active --quiet $servicio; then
-        echo "¡SERVICIO ACTIVO Y FUNCIONANDO!"
+        echo 'INTERFACESv4="enp0s8"' > /etc/default/isc-dhcp-server
+        systemctl restart $servicio
+        
+        if systemctl is-active --quiet $servicio; then
+            echo -e "\n[OK] ¡SERVICIO ACTIVO Y FUNCIONANDO!"
+        else
+            echo -e "\n[!] Error: Revisa 'journalctl -u $servicio'"
+        fi
     else
-        echo "Error: Revisa 'journalctl -u isc-dhcp-server' para ver el detalle final"
+        echo "Configuración cancelada."
     fi
-else
-    echo "Saliendo."
-    exit
-fi
+}
 
-# 3. Menú de Monitoreo
 while true; do
-    echo -e "\n============ MENÚ ============="
-    echo "1) Consultar estado del servicio"
-    echo "2) Listar concesiones"
-    echo "3) Salir"
+    echo -e "\n================================"
+    echo "        Menu dhcp     "
+    echo "================================"
+    echo "1) Crear / Configurar DHCP"
+    echo "2) Consultar estado del servicio"
+    echo "3) Listar concesiones (Leases)"
+    echo "4) Salir"
+    echo "--------------------------------"
     read -p "Opción: " opcion
 
     case $opcion in
-        1)
-            echo "Estado actual:"
+        1) configurar_dhcp ;;
+        2) 
+            echo -e "\n--- Estado del Servicio ---"
             systemctl status $servicio --no-pager
-            echo -e "\nLogs recientes:"
-            journalctl -u $servicio -n 10 --no-pager
             ;;
-        2)
-            echo "Equipos conectados:"
-            [ -f /var/lib/dhcp/dhcpd.leases ] && grep "lease" /var/lib/dhcp/dhcpd.leases || echo "Sin conexiones."
+        3) 
+            echo -e "\n--- Equipos Conectados (Leases) ---"
+            if [ -f /var/lib/dhcp/dhcpd.leases ]; then
+                grep "lease" /var/lib/dhcp/dhcpd.leases | sort | uniq
+            else
+                echo "No se encontraron concesiones activas."
+            fi
             ;;
-        3) break ;;
+        4) echo "Saliendo..."; exit 0 ;;
+        *) echo "Opción no válida." ;;
     esac
 done

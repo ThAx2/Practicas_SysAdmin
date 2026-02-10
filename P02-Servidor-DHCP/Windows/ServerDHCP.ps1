@@ -1,92 +1,128 @@
-# --- FUNCIONES DE APOYO ---
+# 0. Verificación de privilegios de Administrador
+if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    Write-Host " [!] ERROR: Debes ejecutar este script como ADMINISTRADOR." -ForegroundColor Red
+    Pause
+    exit
+}
+
+function Test-IsValidIP {
+    param(
+        [string]$IP,
+        $IPInicio = $null,
+        [switch]$EsRed
+    )
+    if ([string]::IsNullOrWhiteSpace($IP)) { return $false }
+    $IP = $IP.Trim()
+    $regex = '^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$'
+    
+    if ($IP -match $regex) {
+        $octetos = $IP.Split('.')
+        $ultimo = [int]$octetos[3]
+
+        if ($IP -eq "0.0.0.0" -or $IP -eq "255.255.255.255") {
+            Write-Host " [!] IP Prohibida (0.0.0.0 / 255.255.255.255)." -ForegroundColor Red
+            return $false
+        }
+
+        if ($EsRed) {
+            if ($ultimo -ne 0) {
+                Write-Host " [!] Error: Una Direccion de Red DEBE terminar en .0" -ForegroundColor Red
+                return $false
+            }
+        } else {
+            if ($ultimo -eq 0 -or $ultimo -eq 255) {
+                Write-Host " [!] Error: Un host no puede ser .0 (red) ni .255 (broadcast)." -ForegroundColor Red
+                return $false
+            }
+        }
+
+        if ($null -ne $IPInicio -and $IPInicio -ne "") {
+            $octIni = $IPInicio.Trim().Split('.')
+            for ($i = 0; $i -lt 3; $i++) {
+                if ($octetos[$i] -ne $octIni[$i]) {
+                    Write-Host " [!] Error: No pertenece a la red $($octIni[0..2] -join '.').X" -ForegroundColor Red
+                    return $false
+                }
+            }
+            # Validar orden en el rango
+            if ($MyInvocation.Line -match "endIP" -and $ultimo -le [int]$octIni[3]) {
+                Write-Host " [!] Error: El host final ($ultimo) debe ser mayor al inicial ($($octIni[3]))." -ForegroundColor Red
+                return $false
+            }
+        }
+        return $true
+    }
+    Write-Host " [!] Formato de IP invalido." -ForegroundColor Red
+    return $false
+}
+
 function Check-Service {
     param($ServiceName)
-    $service = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
-    if ($null -eq $service) {
-        Write-Host "[!] El servicio $ServiceName no está instalado. Instalando..." -ForegroundColor Yellow
+    Write-Host " [+] Verificando Rol DHCP..." -ForegroundColor Cyan
+    $feature = Get-WindowsFeature DHCP
+    if (-not $feature.Installed) {
+        Write-Host " [!] Instalando Rol DHCP y herramientas de administración..." -ForegroundColor Yellow
         Install-WindowsFeature DHCP -IncludeManagementTools | Out-Null
     }
-    
-    $service = Get-Service -Name $ServiceName
+
+    $service = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
     if ($service.Status -ne 'Running') {
-        Write-Host "[!] El servicio $ServiceName está $($service.Status). Iniciando..." -ForegroundColor Yellow
+        Write-Host " [+] Iniciando servicio $ServiceName..." -ForegroundColor Cyan
         Start-Service $ServiceName
-    } else {
-        Write-Host "[OK] El servicio $ServiceName ya está activo." -ForegroundColor Green
     }
 }
 
-function Mostrar-Menu {
+# --- MENU PRINCIPAL ---
+do {
     Clear-Host
     Write-Host "================================================" -ForegroundColor Yellow
-    Write-Host "   GESTOR DHCP  " -ForegroundColor Yellow
+    Write-Host "       DHCP Windowsito        " -ForegroundColor Yellow
     Write-Host "================================================" -ForegroundColor Yellow
-    Write-Host "1) Configurar Servidor (IP Fija, Ámbito, etc.)"
-    Write-Host "2) Consultar Estado y Ámbitos"
-    Write-Host "3) Ver Concesiones (Leases)"
-    Write-Host "4) Reiniciar / Forzar Inicio"
-    Write-Host "5) Salir"
+    Write-Host " 1) Configurar Servidor (IP Fija y Ambito)"
+    Write-Host " 2) Ver Ambitos y Concesiones"
+    Write-Host " 3) Reiniciar Servicio DHCP"
+    Write-Host " 4) Salir"
     Write-Host "------------------------------------------------"
-}
-
-# --- BUCLE PRINCIPAL ---
-$servicio = "DHCPServer"
-
-do {
-    Mostrar-Menu
-    $opcion = Read-Host "Opción"
-
+    $opcion = Read-Host " Opcion"
+    
     switch ($opcion) {
         "1" {
-            # Verificación de pre-requisitos (como tu mon_service.sh)
-            Check-Service -ServiceName $servicio
-
-            # Petición de datos
-            $interface = Read-Host "Interfaz (ej. Ethernet 2)"
-            $ip_fija   = Read-Host "IP del Servidor (ej. 192.168.100.1)"
-            $scopeName = Read-Host "Nombre del Ámbito"
-            $startIP   = Read-Host "Rango Inicial"
-            $endIP     = Read-Host "Rango Final"
-            $dns       = Read-Host "DNS (ej. 8.8.8.8)"
-
-            Write-Host "`n[+] Aplicando configuración..." -ForegroundColor Cyan
+            $base_red = ""; $ip_fija = ""; $startIP = ""; $endIP = ""; $interface = ""; $scopeName = ""
             
-            # Configura IP Fija
-            New-NetIPAddress -InterfaceAlias $interface -IPAddress $ip_fija -PrefixLength 24 -ErrorAction SilentlyContinue
+            Check-Service -ServiceName "DHCPServer"
             
-            # Configura Ámbito
-            Add-DhcpServerv4Scope -Name $scopeName -StartRange $startIP -EndRange $endIP -SubnetMask 255.255.255.0 -State Active -ErrorAction SilentlyContinue
+            # Recolección de datos
+            do { $interface = Read-Host " Nombre de la Interfaz (ej. Ethernet)" } while ([string]::IsNullOrWhiteSpace($interface))
+            do { $base_red = Read-Host " Direccion de Red (ID de Red, ej. 192.168.100.0)" } until (Test-IsValidIP -IP $base_red -EsRed)
+            do { $ip_fija = Read-Host " IP Fija para este Servidor" } until (Test-IsValidIP -IP $ip_fija -IPInicio $base_red)
+            do { $scopeName = Read-Host " Nombre para el Ambito" } while ([string]::IsNullOrWhiteSpace($scopeName))
+            do { $startIP = Read-Host " Rango Inicial de IPs" } until (Test-IsValidIP -IP $startIP -IPInicio $base_red)
+            do { $endIP = Read-Host " Rango Final de IPs" } until (Test-IsValidIP -IP $endIP -IPInicio $startIP)
             
-            # Opciones
-            Set-DhcpServerv4OptionValue -OptionId 3 -Value $ip_fija
-            Set-DhcpServerv4OptionValue -OptionId 6 -Value $dns
+            Write-Host "`n [+] Aplicando configuracion de red..." -ForegroundColor Cyan
+            # Configurar IP Fija en la tarjeta (Si ya tiene una, la sobreescribe)
+            Remove-NetIPAddress -InterfaceAlias $interface -Confirm:$false -ErrorAction SilentlyContinue
+            New-NetIPAddress -InterfaceAlias $interface -IPAddress $ip_fija -PrefixLength 24 -ErrorAction SilentlyContinue | Out-Null
             
-            # Firewall (Matamos al estorbo)
-            netsh advfirewall set allprofiles state off
+            Write-Host " [+] Creando ambito DHCP..." -ForegroundColor Cyan
+            Add-DhcpServerv4Scope -Name $scopeName -SubnetId $base_red -StartRange $startIP -EndRange $endIP -SubnetMask 255.255.255.0 -State Active
             
-            Write-Host "[OK] Configuración completada." -ForegroundColor Green
+            # Opciones adicionales: Puerta de enlace y DNS (Opcional pero recomendado)
+            Set-DhcpServerv4OptionValue -ScopeId $base_red -OptionId 3 -Value $ip_fija # Router
+            Set-DhcpServerv4OptionValue -ScopeId $base_red -OptionId 6 -Value "8.8.8.8", "8.8.4.4" # DNS
+            
+            Write-Host "`n [OK] Servidor DHCP configurado y activo." -ForegroundColor Green
             Pause
         }
-
         "2" {
-            Write-Host "`n--- ESTADO DEL SERVICIO ---" -ForegroundColor Cyan
-            Get-Service $servicio | Select-Object Name, Status, StartType
-            Write-Host "`n--- ÁMBITOS ACTIVOS ---" -ForegroundColor Cyan
-            Get-DhcpServerv4Scope | Format-Table -AutoSize
+            Write-Host "`n --- AMBITOS CONFIGURADOS ---" -ForegroundColor Cyan
+            Get-DhcpServerv4Scope | Select-Object ScopeId, Name, StartRange, EndRange, State | Format-Table -AutoSize
             Pause
         }
-
         "3" {
-            Write-Host "`n--- CLIENTES CONECTADOS ---" -ForegroundColor Cyan
-            Get-DhcpServerv4Scope | ForEach-Object { Get-DhcpServerv4Lease -ScopeId $_.ScopeId } | Format-Table -AutoSize
-            Pause
-        }
-
-        "4" {
-            Write-Host "`n[!] Reiniciando servicio DHCP..." -ForegroundColor Yellow
-            Restart-Service $servicio
-            Write-Host "[OK] Servicio reiniciado." -ForegroundColor Green
+            Restart-Service DHCPServer
+            Write-Host " [OK] Servicio reiniciado." -ForegroundColor Green
             Pause
         }
     }
-} while ($opcion -ne "5")
+} while ($opcion -ne "4")
