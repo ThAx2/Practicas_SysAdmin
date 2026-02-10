@@ -76,7 +76,7 @@ function Check-Service {
 do {
     Clear-Host
     Write-Host "================================================" -ForegroundColor Yellow
-    Write-Host "        DHCP Windowsito (CORREGIDO)    " -ForegroundColor Yellow
+    Write-Host "        DHCP Windowsito        " -ForegroundColor Yellow
     Write-Host "================================================" -ForegroundColor Yellow
     Write-Host " 1) Configurar Servidor (IP Fija y Ambito)"
     Write-Host " 2) Ver Ambitos y Concesiones"
@@ -100,19 +100,21 @@ do {
             do { $endIP = Read-Host " Rango Final de IPs" } until (Test-IsValidIP -IP $endIP -IPInicio $startIP)
             
             Write-Host "`n [+] Aplicando configuracion de red..." -ForegroundColor Cyan
-            # Configurar IP Fija en la tarjeta
+            # Configurar IP Fija en la tarjeta (Si ya tiene una, la sobreescribe)
             Remove-NetIPAddress -InterfaceAlias $interface -Confirm:$false -ErrorAction SilentlyContinue
             New-NetIPAddress -InterfaceAlias $interface -IPAddress $ip_fija -PrefixLength 24 -ErrorAction SilentlyContinue | Out-Null
             
             Write-Host " [+] Creando ambito DHCP..." -ForegroundColor Cyan
             
-            # --- CORRECCIÓN: Limpieza previa para evitar error si ya existe ---
+            # CORRECCIÓN PARA TU ERROR:
+            # Primero borramos si ya existe para evitar conflictos
             Remove-DhcpServerv4Scope -ScopeId $base_red -Force -ErrorAction SilentlyContinue
             
-            # --- CORRECCIÓN: Se usa -ScopeId en lugar de -SubnetId ---
-            Add-DhcpServerv4Scope -Name $scopeName -ScopeId $base_red -StartRange $startIP -EndRange $endIP -SubnetMask 255.255.255.0 -State Active
+            # El comando correcto para tu versión de Server:
+            # Quitamos el parámetro que te daba error y dejamos que lo asigne por los rangos
+            Add-DhcpServerv4Scope -Name $scopeName -StartRange $startIP -EndRange $endIP -SubnetMask 255.255.255.0 -State Active
             
-            # Opciones adicionales: Puerta de enlace y DNS
+            # Opciones adicionales (Aquí sí usamos el ID porque el ámbito ya está creado)
             Set-DhcpServerv4OptionValue -ScopeId $base_red -OptionId 3 -Value $ip_fija # Router
             Set-DhcpServerv4OptionValue -ScopeId $base_red -OptionId 6 -Value "8.8.8.8", "8.8.4.4" # DNS
             
@@ -122,8 +124,7 @@ do {
         "2" {
             Write-Host "`n --- AMBITOS CONFIGURADOS ---" -ForegroundColor Cyan
             Get-DhcpServerv4Scope | Select-Object ScopeId, Name, StartRange, EndRange, State | Format-Table -AutoSize
-            
-            Write-Host " --- CONCESIONES (LEASES) ---" -ForegroundColor Cyan
+            Write-Host " --- CONCESIONES ACTIVAS ---" -ForegroundColor Cyan
             Get-DhcpServerv4Scope | ForEach-Object { Get-DhcpServerv4Lease -ScopeId $_.ScopeId } | Format-Table -AutoSize
             Pause
         }
