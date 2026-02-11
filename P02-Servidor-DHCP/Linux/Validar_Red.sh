@@ -11,36 +11,33 @@
 # ===========================================================================
 # Script: Validador de Red (Versión Estricta)
 # ===========================================================================
-
 valid_ip(){
-    local ip=$(echo "$1" | xargs)            # IP a validar
-    local ip_referencia=$(echo "$2" | xargs) # IP base (Red o Inicio de rango)
-    local tipo=$3                            # Tipo: red, mask, host, rango
+    local ip=$(echo "$1" | xargs)            
+    local ip_referencia=$(echo "$2" | xargs) 
+    local tipo=$3                            
 
-    # 1. Validación de Formato Básico (x.x.x.x)
     if [[ -z "$ip" ]]; then return 1; fi
     if [[ ! $ip =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
-        echo -e "\e[31m[!] Error: Formato incorrecto. Use formato IPv4 (ej. 192.168.1.5)\e[0m"
+        echo -e "\e[31m[!] Error: Formato incorrecto. Use IPv4.\e[0m"
         return 1
     fi
 
     IFS='.' read -r -a ip_array <<< "$ip"
-
     for octeto in "${ip_array[@]}"; do
         if [[ "$octeto" -lt 0 || "$octeto" -gt 255 ]]; then
-            echo -e "\e[31m[!] Error: Octeto fuera de rango ($octeto). Debe ser 0-255.\e[0m"
+            echo -e "\e[31m[!] Error: Octeto fuera de rango ($octeto).\e[0m"
             return 1
         fi
     done
 
-    if [[ $ip == "127.0.0.1" || $ip == "255.255.255.255" ]]; then
-        echo -e "\e[31m[!] Error: IP reservada de sistema ($ip).\e[0m"
+    if [[ $ip == "0.0.0.0" ]]; then
+        echo -e "\e[31m[!] Error: Dirección nula prohibida (0.0.0.0).\e[0m"
         return 1
     fi
-    
-    if [[ ${ip_array[0]} -eq 0 ]]; then
-         echo -e "\e[31m[!] Error: El primer octeto no puede ser 0.\e[0m"
-         return 1
+
+    if [[ ${ip_array[0]} -eq 127 ]]; then
+        echo -e "\e[31m[!] Error: Direcciones de Loopback (127.x.x.x) son reservadas.\e[0m"
+        return 1
     fi
 
     if [[ $ip == "1.0.0.0" ]]; then
@@ -48,8 +45,17 @@ valid_ip(){
         return 1
     fi
 
+    if [[ $ip == "255.255.255.255" ]]; then
+        echo -e "\e[31m[!] Error: Dirección de Broadcast Global prohibida.\e[0m"
+        return 1
+    fi
+
+    if [[ ${ip_array[0]} -eq 0 ]]; then
+         echo -e "\e[31m[!] Error: El primer octeto no puede ser 0.\e[0m"
+         return 1
+    fi
+
     local ultimo=${ip_array[3]}
-    
     case $tipo in
         "red")
             if [[ $ultimo -ne 0 ]]; then
@@ -65,7 +71,7 @@ valid_ip(){
             ;;
         "host"|"rango")
             if [[ $ultimo -eq 0 || $ultimo -eq 255 ]]; then
-                echo -e "\e[31m[!] Error: Hosts no pueden terminar en .0 (Red) ni .255 (Broadcast).\e[0m"
+                echo -e "\e[31m[!] Error: No use .0 (Red) ni .255 (Broadcast) para hosts.\e[0m"
                 return 1
             fi 
             ;;
@@ -73,17 +79,16 @@ valid_ip(){
 
     if [[ -n $ip_referencia ]]; then
         IFS='.' read -r -a ref_array <<< "$ip_referencia"
-        
         if [[ ${ip_array[0]} -ne ${ref_array[0]} ]] || \
            [[ ${ip_array[1]} -ne ${ref_array[1]} ]] || \
            [[ ${ip_array[2]} -ne ${ref_array[2]} ]]; then
-            echo -e "\e[31m[!] Error: Segmento incorrecto. La IP debe ser ${ref_array[0]}.${ref_array[1]}.${ref_array[2]}.X\e[0m"
+            echo -e "\e[31m[!] Error: La IP $ip no pertenece a la red ${ref_array[0]}.${ref_array[1]}.${ref_array[2]}.0\e[0m"
             return 1
         fi
 
         if [[ $tipo == "rango" ]]; then
             if [[ ${ip_array[3]} -le ${ref_array[3]} ]]; then
-                echo -e "\e[31m[!] Error: Rango ilógico. El final (.${ip_array[3]}) debe ser mayor al inicio (.${ref_array[3]})\e[0m"
+                echo -e "\e[31m[!] Error: El final (.${ip_array[3]}) debe ser mayor al inicio (.${ref_array[3]})\e[0m"
                 return 1
             fi
         fi
