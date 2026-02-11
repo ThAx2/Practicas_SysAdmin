@@ -1,10 +1,8 @@
-# 0. Verificación de privilegios de Administrador
 if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     Write-Host " [!] ERROR: Debes ejecutar este script como ADMINISTRADOR." -ForegroundColor Red
     Pause
     exit
 }
-
 function Test-IsValidIP {
     param(
         [string]$IP,
@@ -82,7 +80,7 @@ function Check-Service {
 do {
     Clear-Host
     Write-Host "================================================" -ForegroundColor Yellow
-    Write-Host "         DHCP WINDOWSITO - AX2 EDITION          " -ForegroundColor Yellow
+    Write-Host "         DHCP WINDOWSITO          " -ForegroundColor Yellow
     Write-Host "================================================" -ForegroundColor Yellow
     Write-Host " 1) Configurar Servidor (IP Fija y Ambito)"
     Write-Host " 2) Ver Ambitos y Concesiones"
@@ -96,7 +94,7 @@ do {
             $interface = Read-Host " Nombre de la Interfaz (ej. Ethernet)"
             
             do { $mask = Read-Host " Mascara de Subred" } until (Test-IsValidIP -IP $mask -Tipo "mask")
-            do { $ip_i = Read-Host " IP Inicial / IP Servidor (Acepta .0)" } until (Test-IsValidIP -IP $ip_i -Tipo "host")
+            do { $ip_i = Read-Host " IP Inicial Sera la IP Servidor " } until (Test-IsValidIP -IP $ip_i -Tipo "host")
             
             $octs = $ip_i.Split('.')
             $base_red = "$($octs[0..2] -join '.').0"
@@ -104,6 +102,9 @@ do {
             do { $ip_f = Read-Host " Rango Final (>= $ip_i)" } until (Test-IsValidIP -IP $ip_f -IPReferencia $ip_i -Tipo "rango")
             
             $scopeName = Read-Host " Nombre para el Ambito"
+	    do {
+		$lease_seconds = Read-Host " Tiempo de concesion"
+	    } while ($lease_seconds -notmatch '^[0-9]+$' -or [int]$lease_seconds -le 0) 
             $gw = Read-Host " Puerta de enlace (Enter para omitir)"
             $dns = Read-Host " Servidor DNS (Enter para omitir)"
 
@@ -118,7 +119,7 @@ do {
 
             Write-Host " [+] Creando Ambito DHCP en $base_red..." -ForegroundColor Cyan
             Remove-DhcpServerv4Scope -ScopeId $base_red -Force -ErrorAction SilentlyContinue
-            Add-DhcpServerv4Scope -Name $scopeName -StartRange $rango_real_inicio -EndRange $rango_real_final -SubnetMask $mask -State Active
+            Add-DhcpServerv4Scope -Name $scopeName -StartRange $rango_real_inicio -EndRange $rango_real_final -SubnetMask $mask -LeaseDuration (New-TimeSpan -Seconds $lease_seconds) -State Active
             
             if ($gw) { Set-DhcpServerv4OptionValue -ScopeId $base_red -OptionId 3 -Value $gw }
             if ($dns) { Set-DhcpServerv4OptionValue -ScopeId $base_red -OptionId 6 -Value $dns }
