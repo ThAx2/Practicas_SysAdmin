@@ -27,7 +27,6 @@ function Test-IsValidIP {
             return $false
         }
 
-        # CORRECCIÓN DE SINTAXIS SWITCH
         switch ($Tipo) {
             "mask" {
                 $masksValidas = @("255.0.0.0", "255.128.0.0", "255.192.0.0", "255.224.0.0", "255.240.0.0", "255.248.0.0", "255.252.0.0", "255.254.0.0", "255.255.0.0", "255.255.128.0", "255.255.192.0", "255.255.224.0", "255.255.240.0", "255.255.248.0", "255.255.252.0", "255.255.254.0", "255.255.255.0", "255.255.255.128", "255.255.255.192", "255.255.255.224", "255.255.255.240", "255.255.255.248", "255.255.255.252")
@@ -59,19 +58,31 @@ function Check-Service {
     param($ServiceName)
     Write-Host "`n [+] Verificando Rol DHCP..." -ForegroundColor Cyan
     $feature = Get-WindowsFeature DHCP
-    if (-not $feature.Installed) {
+    
+    if ($feature.Installed) {
+        Write-Host " [!] El Rol DHCP ya está instalado." -ForegroundColor Yellow
+        $confirm = Read-Host "¿Deseas REINSTALARLO por completo (limpieza profunda)? (s/n)"
+        if ($confirm -match "[Ss]") {
+            Write-Host " [*] Eliminando Rol y configuraciones previas..." -ForegroundColor Magenta
+            Uninstall-WindowsFeature DHCP -Remove -IncludeManagementTools | Out-Null
+            Write-Host " [*] Reinstalando Rol DHCP..." -ForegroundColor Magenta
+            Install-WindowsFeature DHCP -IncludeManagementTools | Out-Null
+        }
+    } else {
         Write-Host " [!] Instalando Rol DHCP y herramientas..." -ForegroundColor Yellow
         Install-WindowsFeature DHCP -IncludeManagementTools | Out-Null
     }
+
     if ((Get-Service $ServiceName).Status -ne 'Running') {
         Start-Service $ServiceName
     }
 }
 
+# --- MENU PRINCIPAL ---
 do {
     Clear-Host
     Write-Host "================================================" -ForegroundColor Yellow
-    Write-Host "         DHCP WINDOWSITO         " -ForegroundColor Yellow
+    Write-Host "         DHCP WINDOWSITO - AX2 EDITION          " -ForegroundColor Yellow
     Write-Host "================================================" -ForegroundColor Yellow
     Write-Host " 1) Configurar Servidor (IP Fija y Ambito)"
     Write-Host " 2) Ver Ambitos y Concesiones"
@@ -85,7 +96,7 @@ do {
             $interface = Read-Host " Nombre de la Interfaz (ej. Ethernet)"
             
             do { $mask = Read-Host " Mascara de Subred" } until (Test-IsValidIP -IP $mask -Tipo "mask")
-            do { $ip_i = Read-Host " IP Inicial / IP Servidor" } until (Test-IsValidIP -IP $ip_i -Tipo "host")
+            do { $ip_i = Read-Host " IP Inicial / IP Servidor (Acepta .0)" } until (Test-IsValidIP -IP $ip_i -Tipo "host")
             
             $octs = $ip_i.Split('.')
             $base_red = "$($octs[0..2] -join '.').0"
@@ -96,6 +107,7 @@ do {
             $gw = Read-Host " Puerta de enlace (Enter para omitir)"
             $dns = Read-Host " Servidor DNS (Enter para omitir)"
 
+            # Lógica de Desplazamiento +1
             $rango_real_inicio = "$($octs[0..2] -join '.').$([int]$octs[3] + 1)"
             $octsF = $ip_f.Split('.')
             $rango_real_final = "$($octsF[0..2] -join '.').$([int]$octsF[3] + 1)"
@@ -104,7 +116,7 @@ do {
             Remove-NetIPAddress -InterfaceAlias $interface -Confirm:$false -ErrorAction SilentlyContinue
             New-NetIPAddress -InterfaceAlias $interface -IPAddress $ip_i -PrefixLength 24 -ErrorAction SilentlyContinue | Out-Null
 
-            Write-Host " [+] Creando Ambito DHCP..." -ForegroundColor Cyan
+            Write-Host " [+] Creando Ambito DHCP en $base_red..." -ForegroundColor Cyan
             Remove-DhcpServerv4Scope -ScopeId $base_red -Force -ErrorAction SilentlyContinue
             Add-DhcpServerv4Scope -Name $scopeName -StartRange $rango_real_inicio -EndRange $rango_real_final -SubnetMask $mask -State Active
             
@@ -115,10 +127,12 @@ do {
             Pause
         }
         "2" {
+            Write-Host "`n --- AMBITOS ---" -ForegroundColor Cyan
             Get-DhcpServerv4Scope | Select-Object ScopeId, Name, StartRange, EndRange, State | Format-Table -AutoSize
+            Write-Host " --- CONCESIONES ---" -ForegroundColor Cyan
             Get-DhcpServerv4Scope | ForEach-Object { Get-DhcpServerv4Lease -ScopeId $_.ScopeId } | Format-Table -AutoSize
             Pause
         }
-        "3" { Restart-Service DHCPServer; Pause }
+        "3" { Restart-Service DHCPServer; Write-Host " [+] Servicio reiniciado."; Pause }
     }
 } while ($opcion -ne "4")
