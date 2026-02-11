@@ -100,22 +100,15 @@ do {
             do { $endIP = Read-Host " Rango Final de IPs" } until (Test-IsValidIP -IP $endIP -IPInicio $startIP)
             
             Write-Host "`n [+] Aplicando configuracion de red..." -ForegroundColor Cyan
-            # Configurar IP Fija en la tarjeta (Si ya tiene una, la sobreescribe)
             Remove-NetIPAddress -InterfaceAlias $interface -Confirm:$false -ErrorAction SilentlyContinue
             New-NetIPAddress -InterfaceAlias $interface -IPAddress $ip_fija -PrefixLength 24 -ErrorAction SilentlyContinue | Out-Null
             
             Write-Host " [+] Creando ambito DHCP..." -ForegroundColor Cyan
             
-            # CORRECCIÓN PARA TU ERROR:
-            # Primero borramos si ya existe para evitar conflictos
-            Remove-DhcpServerv4Scope -ScopeId $base_red -Force -ErrorAction SilentlyContinue
+           Remove-DhcpServerv4Scope -ScopeId $base_red -Force -ErrorAction SilentlyContinue
             
-            # El comando correcto para tu versión de Server:
-            # Quitamos el parámetro que te daba error y dejamos que lo asigne por los rangos
-            Add-DhcpServerv4Scope -Name $scopeName -StartRange $startIP -EndRange $endIP -SubnetMask 255.255.255.0 -State Active
-            
-            # Opciones adicionales (Aquí sí usamos el ID porque el ámbito ya está creado)
-            Set-DhcpServerv4OptionValue -ScopeId $base_red -OptionId 3 -Value $ip_fija # Router
+           Add-DhcpServerv4Scope -Name $scopeName -StartRange $startIP -EndRange $endIP -SubnetMask 255.255.255.0 -State Active
+           Set-DhcpServerv4OptionValue -ScopeId $base_red -OptionId 3 -Value $ip_fija # Router
             Set-DhcpServerv4OptionValue -ScopeId $base_red -OptionId 6 -Value "8.8.8.8", "8.8.4.4" # DNS
             
             Write-Host "`n [OK] Servidor DHCP configurado y activo." -ForegroundColor Green
