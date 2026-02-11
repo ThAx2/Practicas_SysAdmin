@@ -64,10 +64,12 @@ valid_ip(){
             fi 
             ;;
         "mask")
-            if [[ ${ip_array[0]} -ne 255 ]]; then
-                echo -e "\e[31m[!] Error: Máscara inválida. Debe empezar con 255.\e[0m"
+            local masks_validas="255.0.0.0 255.128.0.0 255.192.0.0 255.224.0.0 255.240.0.0 255.248.0.0 255.252.0.0 255.254.0.0 255.255.0.0 255.255.128.0 255.255.192.0 255.255.224.0 255.255.240.0 255.255.248.0 255.255.252.0 255.255.254.0 255.255.255.0 255.255.255.128 255.255.255.192 255.255.255.224 255.255.255.240 255.255.255.248 255.255.255.252"
+            
+            if [[ ! $masks_validas =~ $ip ]]; then
+                echo -e "\e[31m[!] Error: Máscara $ip no es válida. Debe ser una máscara de subred real.\e[0m"
                 return 1
-            fi 
+            fi
             ;;
         "host"|"rango")
             if [[ $ultimo -eq 0 || $ultimo -eq 255 ]]; then
@@ -87,12 +89,13 @@ valid_ip(){
         fi
 
         if [[ $tipo == "rango" ]]; then
-            if [[ ${ip_array[3]} -le ${ref_array[3]} ]]; then
-                echo -e "\e[31m[!] Error: El final (.${ip_array[3]}) debe ser mayor al inicio (.${ref_array[3]})\e[0m"
+            if [[ ${ip_array[3]} -lt ${ref_array[3]} ]]; then
+                echo -e "\e[31m[!] Error: Rango ilógico. El final (.${ip_array[3]}) debe ser mayor o igual al inicio (.${ref_array[3]})\e[0m"
                 return 1
             fi
         fi
-    fi
+        fi
+    
 
     return 0
 }

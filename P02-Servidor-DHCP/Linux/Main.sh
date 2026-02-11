@@ -29,9 +29,8 @@ configurar_dhcp() {
     done
 
     until valid_ip "$ip_f" "$ip_i" "rango"; do 
-        read -p "Rango Final (mayor o igual a $ip_i): " ip_f
-    done
-
+    read -p "Rango Final (mayor o igual a $ip_i): " ip_f
+done
     while true; do
         read -p "Tiempo de concesión (segundos): " lease_time
         if [[ $lease_time =~ ^[0-9]+$ ]] && [[ $lease_time -ne 0 ]]; then 
