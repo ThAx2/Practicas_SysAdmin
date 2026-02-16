@@ -58,8 +58,7 @@ EOF
 menu_dns(){
     SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
     P02_DIR="$SCRIPT_DIR/../../P02-Servidor-DHCP/Linux"
-    interfaz=$(ip route | grep default | awk '{print $5}' | head -n1)
-    [[ -z "$interfaz" ]] && interfaz="eth0" 
+    interfaz="enp0s8" 
 echo "[*] Usando interfaz: $interfaz"
     echo "[*] Buscando dependencias en: $P02_DIR"
 
