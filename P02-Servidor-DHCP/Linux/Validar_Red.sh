@@ -1,3 +1,5 @@
+#!/bin/bash
+
 # ===========================================================================
 # Script: Validador de Red
 # Author: Alexander Vega / Ax2 - / Codigo principal tomado de: https://www.linuxjournal.com/content/validating-ip-address-bash-script + Validacion que IP Inicial sea menor a la IP Final
@@ -7,10 +9,68 @@
 # Descripcion = Valida el formato IPv4 (0-255) mediante Regex y asegura la 
 #               integridad del rango comparando el cuarto octeto final vs inicial, obtiene la ip una vez validada, la deshace en un array separando los octetos y analizandolos/comparandolos individualmente a excepcion del ultimo octeto que compara con ip de incio para verificar la coherencia en el rango.
 # Parametros = $1 - IP a validar / $2 - IP de inicio (para comparar rangos) | Funciona con un parametro para verificar la base de la ip y dos para verificar rangos.
-#!/bin/bash
-# ===========================================================================
-# Script: Validador de Red (Versión Estricta)
-# ===========================================================================
+
+
+
+configurar_Red(){
+    local interfaz=$1
+    local base_ip="" mask="" ip_i="" gateway="" dns_server="" respuesta=""
+    
+    echo -e "\n[*] Iniciando Configuración de Interfaz: $interfaz"
+   until valid_ip "$mask" "" "mask"; do 
+        read -p "Máscara de Subred (ej. 255.255.255.0): " mask
+    done
+   while true; do
+        read -p "IP Estática para este Servidor: " ip_i
+        if valid_ip "$ip_i" "" "host"; then
+            break
+        fi
+    done
+
+    IFS='.' read -r -a oct_i <<< "$ip_i"
+    base_ip="${oct_i[0]}.${oct_i[1]}.${oct_i[2]}.0"
+
+    while true; do
+        read -p "Puerta de enlace (Enter para omitir): " gateway
+        [[ -z "$gateway" ]] && break
+        valid_ip "$gateway" "$base_ip" "host" && break
+    done
+
+    while true; do
+        read -p "DNS Forwarder / Externo (Enter para omitir): " dns_server
+        [[ -z "$dns_server" ]] && break
+        valid_ip "$dns_server" "" "host" && break
+    done
+
+    echo -e "\n========================================"
+    echo "         RESUMEN DE RED (ESTÁTICA)"
+    echo "========================================"
+    echo "INTERFAZ:          $interfaz"
+    echo "IP SERVIDOR:       $ip_i"
+    echo "MÁSCARA:           $mask"
+    echo "RED PERTENECIENTE: $base_ip"
+    echo "GATEWAY:           ${gateway:-Ninguno}"
+    echo "DNS EXTERNO:       ${dns_server:-Ninguno}"
+    echo "========================================"
+    read -p "¿Deseas aplicar estos cambios? (s/n): " respuesta
+
+    if [[ $respuesta =~ ^[Ss]$ ]]; then
+        echo "[*] Aplicando cambios con comando 'ip'..."
+        ip addr flush dev "$interfaz"
+        ip addr add "$ip_i/$mask" dev "$interfaz"
+        ip link set "$interfaz" up
+        
+        if [[ -n "$gateway" ]]; then
+            ip route add default via "$gateway" dev "$interfaz" 2>/dev/null
+        fi
+
+        echo -e "\e[32m[OK] Red configurada correctamente.\e[0m"
+    else
+        echo -e "\e[33m[!] Configuración cancelada.\e[0m"
+    fi
+}
+
+
 valid_ip(){
     local ip=$(echo "$1" | xargs)            
     local ip_referencia=$(echo "$2" | xargs) 
@@ -72,8 +132,8 @@ valid_ip(){
             fi
             ;;
         "host"|"rango")
-            if [[ $ultimo -eq 0 || $ultimo -eq 255 ]]; then
-                echo -e "\e[31m[!] Error: No use .0 (Red) ni .255 (Broadcast) para hosts.\e[0m"
+            if [[ $ultimo -eq 255 ]]; then
+                echo -e "\e[31m[!] Error: No use .255 (Broadcast) para hosts.\e[0m"
                 return 1
             fi 
             ;;
@@ -98,4 +158,20 @@ valid_ip(){
     
 
     return 0
+}
+
+valid_dominio() {
+    local dominio=$1
+    local regex="^([a-zA-Z0-9][-a-zA-Z0-9]*\.)+[a-zA-Z]{2,}$"
+
+    if [[ -z "$dominio" ]]; then
+        echo -e "\e[31m[!] Error: El dominio no puede estar vacío.\e[0m"
+        return 1
+    fi
+    if [[ $dominio =~ $regex ]]; then
+        return 0
+    else
+        echo -e "\e[31m[!] Error: '$dominio' no es un formato de dominio válido (ej: dominio.com).\e[0m"
+        return 1
+    fi
 }
