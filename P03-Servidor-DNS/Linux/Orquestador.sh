@@ -56,20 +56,22 @@ EOF
 }
 
 menu_dns(){
-    # Rutas
-    P02_DIR="/home/uwu/Documentos/Practicas_SysAdm/P02-Servidor-DHCP/Linux"
-    interfaz="wlan0" 
+    SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+    P02_DIR="$SCRIPT_DIR/../../P02-Servidor-DHCP/Linux"
+    interfaz=$(ip route | grep default | awk '{print $5}' | head -n1)
+    [[ -z "$interfaz" ]] && interfaz="eth0" 
+echo "[*] Usando interfaz: $interfaz"
+    echo "[*] Buscando dependencias en: $P02_DIR"
 
     if [ -d "$P02_DIR" ]; then
         source "$P02_DIR/Validar_Red.sh"
         source "$P02_DIR/mon_service.sh"
-        source "$P02_DIR/DHCP.sh"
-        source "./Validar_Dominio.sh" 
+        source "$P02_DIR/DHCP.sh" 
     else
-        echo "Error: No se encontró la ruta de la P02."
+        echo -e "\e[31m[!] Error: No se encontró la carpeta P02.\e[0m"
+        echo "Ruta intentada: $P02_DIR"
         exit 1
     fi
-
     while true; do
         echo -e "\n===================================="
         echo "            ORQUESTADOR             "
