@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# ===========================================================================
+# Script: Orquestador Maestro (Libertad Total de IPs)
+# ===========================================================================
 
 cargar_dependencias() {
     export interfaz="enp0s8"
@@ -25,93 +28,58 @@ check_red_lista() {
     return 0
 }
 
-# --- MÓDULO DNS ACTUALIZADO (Servidor + Dominios) ---
-Gestionar_DNS_Modular() {
+Configurar_DNS_Manual(){
     local servicio="bind9"
-    local conf_options="/etc/bind/named.conf.options"
+    local dominio="" 
+
+    mon_service "$servicio"
+
+    if ! check_red_lista; then
+        echo -e "\n[*] Red no configurada. Iniciando asistente..."
+        configurar_Red "$interfaz"
+    fi
     
-    # --- BLOQUE DE CONFIGURACIÓN DEL SERVIDOR ---
-    # Esto permite que el servidor reciba consultas de otros equipos
-    echo "[*] Aplicando configuración global del servidor DNS..."
-    cat <<EOF > $conf_options
+    local IP_SERVIDOR=$(ip -4 addr show "$interfaz" | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -n1)
+
+    cat <<EOF > /etc/bind/named.conf.options
 options {
     directory "/var/cache/bind";
-
-    # Escuchar en todas las interfaces (necesario para que el cliente lo vea)
     listen-on port 53 { any; };
-    
-    # Permitir consultas desde cualquier IP
     allow-query { any; };
-
-    # Permitir que resuelva nombres externos
     recursion yes;
-
     dnssec-validation auto;
     listen-on-v6 { any; };
 };
 EOF
 
-    mon_service "$servicio"
+    until [[ -n "$dominio" ]]; do
+        read -p "Nombre del Dominio (ej: testeo.com): " dominio
+    done
 
-    while true; do
-        echo -e "\n===================================="
-        echo "        MODULO GESTIÓN DNS          "
-        echo "===================================="
-        echo "1) Listar Dominios"
-        echo "2) Crear Nuevo Dominio (Subir)"
-        echo "3) Borrar Dominio"
-        echo "4) Volver al Orquestador"
-        read -p "Seleccione una opción: " opt_dns
+    echo "La IP del servidor DNS actual es: $IP_SERVIDOR"
+    read -p "Ingresa la IP a donde quieres que apunte $dominio (Enter para usar $IP_SERVIDOR): " IP_DESTINO
+    ue escribió.
+    local IP_FINAL=${IP_DESTINO:-$IP_SERVIDOR}
 
-        case $opt_dns in
-            1)
-                echo -e "\n[*] Dominios configurados actualmente:"
-                grep "zone" /etc/bind/named.conf.local | cut -d'"' -f2
-                read -p "Presione Enter para continuar..."
-                ;;
-            2)
-                local dominio=""
-                until valid_dominio "$dominio"; do
-                    read -p "Nombre dominio: " dominio
-                done
+    echo -e "\n[*] Configurando zona: $dominio apuntando a -> $IP_FINAL"
+    
+    echo "zone \"$dominio\" { type master; file \"/etc/bind/db.$dominio\"; };" >> /etc/bind/named.conf.local
 
-                check_red_lista || configurar_Red "$interfaz"
-                local IP_SERVIDOR=$(ip -4 addr show "$interfaz" | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -n1)
-
-                read -p "IP DE DESTINO DEL DOMINIO (Enter para apuntar al servidor $IP_SERVIDOR): " ip_usuario
-                local ip_final=${ip_usuario:-$IP_SERVIDOR}
-
-                echo "[*] Configurando zona: $dominio -> $ip_final"
-                
-                # Registro en named.conf.local
-                echo "zone \"$dominio\" { type master; file \"/etc/bind/db.$dominio\"; };" >> /etc/bind/named.conf.local
-
-                # Creación del archivo de zona (db.dominio)
-                cat <<EOF > /etc/bind/db.$dominio
+    cat <<EOF > /etc/bind/db.$dominio
 \$TTL    604800
 @       IN      SOA     ns.$dominio. root.$dominio. ( 1; 604800; 86400; 2419200; 604800 )
 @       IN      NS      ns.$dominio.
-@       IN      A       $ip_final
+@       IN      A       $IP_FINAL
 ns      IN      A       $IP_SERVIDOR
-www     IN      A       $ip_final
+www     IN      A       $IP_FINAL
 EOF
-                systemctl restart "$servicio"
-                echo -e "\e[32m[OK] Servidor y dominio $dominio configurados.\e[0m"
-                ;;
-            3)
-                read -p "Ingrese dominio a borrar: " borrar
-                if grep -q "zone \"$borrar\"" /etc/bind/named.conf.local; then
-                    sed -i "/zone \"$borrar\"/,/};/d" /etc/bind/named.conf.local
-                    rm -f "/etc/bind/db.$borrar"
-                    systemctl restart "$servicio"
-                    echo -e "\e[32m[OK] Dominio eliminado.\e[0m"
-                else
-                    echo -e "\e[31m[!] No existe.\e[0m"
-                fi
-                ;;
-            4) break ;;
-        esac
-    done
+
+    if named-checkconf /etc/bind/named.conf.local; then
+        systemctl restart "$servicio"
+        echo -e "\e[32m[OK] Dominio $dominio creado. Apunta a $IP_FINAL\e[0m"
+    else
+        echo -e "\e[31m[!] Error de sintaxis en BIND9.\e[0m"
+    fi
 }
 
 menu_principal(){
@@ -122,18 +90,15 @@ menu_principal(){
         echo "      ORQUESTADOR MULTIMÓDULO       "
         echo "===================================="
         echo "1) Configurar Servidor DHCP"
-        echo "2) Configurar Servidor DNS (Módulo)"
+        echo "2) Configurar Servidor DNS (Manual)"
         echo "3) Configuración de Red Manual"
         echo "4) Estatus de Servicios"
         echo "5) Salir"
         read -p "Opción: " opcion 
         
         case $opcion in
-            1)
-                # Entramos directo al menú para evitar bloqueos
-                menu_dhcp
-                ;;
-            2) Gestionar_DNS_Modular ;;
+            1) menu_dhcp ;;
+            2) Configurar_DNS_Manual ;;
             3) configurar_Red "$interfaz" ;;
             4) 
                 echo -e "\n--- Estatus ---"
