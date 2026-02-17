@@ -38,10 +38,13 @@ Configurar_DNS(){
 
     read -p "Ingrese el nombre de dominio: " dominio
     [[ -z "$dominio" ]] && return 1
+
     read -p "IP de DESTINO para $dominio (Enter para usar server $IP_SRV): " ip_dest
     local IP_FINAL=${ip_dest:-$IP_SRV}
+
     echo -e "\n[*] Configurando zona: $dominio -> $IP_FINAL"
     
+    sed -i "/zone \"$dominio\"/,/};/d" "$conf_local"
     cat <<EOF >> "$conf_local"
 zone "$dominio" {
     type master;
@@ -50,21 +53,21 @@ zone "$dominio" {
 EOF
 
     cat <<EOF > "/etc/bind/db.$dominio"
-\$TTL    604800
-@       IN      SOA     ns.$dominio. root.$dominio. ( 1; 604800; 86400; 2419200; 604800 )
-;
-@       IN      NS      ns.$dominio.
-@       IN      A       $IP_FINAL
-ns      IN      A       $IP_SRV
-www     IN      CNAME   $dominio.
+\$TTL 604800
+@ IN SOA ns.$dominio. root.$dominio. ( 1 604800 86400 2419200 604800 )
+@ IN NS ns.$dominio.
+@ IN A $IP_FINAL
+ns IN A $IP_SRV
+www IN A $IP_FINAL
 EOF
 
     named-checkconf "$conf_local" && named-checkzone "$dominio" "/etc/bind/db.$dominio"
+    
     if [ $? -eq 0 ]; then
         systemctl restart "$servicio"
-        echo -e "\e[32m[OK] Dominio $dominio apunta a $IP_FINAL\e[0m"
+        echo -e "\e[32m[OK] Servidor y dominio $dominio configurados.\e[0m"
     else
-        echo -e "\e[31m[!] Error de sintaxis.\e[0m"
+        echo -e "\e[31m[!] Error de sintaxis en el archivo de zona.\e[0m"
     fi
 }
 menu_principal(){
