@@ -9,33 +9,54 @@ function Forzar-Instalacion {
     }
 }
 
-# --- 2. EL PUTO ABC DE DNS ---
-function Menu-DNS {
-    Forzar-Instalacion -NombrePS "DNS" -NombreDISM "DNS"
+function Menu-DNS{
     do {
         Clear-Host
-        Write-Host "=== ABC DE DNS ===" -ForegroundColor Yellow
-        Write-Host "1) ALTA (Zona y Registro A)"
-        Write-Host "2) BAJA (Borrar Registro)"
-        Write-Host "3) CONSULTA"
-        Write-Host "4) Volver"
-        $op = Read-Host "Selecciona"
-        switch ($op) {
+        Write-Host "=== ABC DE DNS (SIN ERRORES) ===" -ForegroundColor Yellow
+        Write-Host " 1) ALTA (Crear Zona y Registro A)"
+        Write-Host " 2) BAJA (Eliminar Registro)"
+        Write-Host " 3) CONSULTA (Ver Registros)"
+        Write-Host " 4) Volver al Menú Principal"
+        $abc = Read-Host " Selecciona una opción"
+
+        switch ($abc) {
             "1" {
-                $z = Read-Host "Nombre de Zona"; $h = Read-Host "Host (www)"; $ip = Read-Host "IP"
-                Add-DnsServerPrimaryZone -Name $z -ZoneFile "$z.dns" -ErrorAction SilentlyContinue
-                Add-DnsServerResourceRecordA -Name $h -ZoneName $z -IPv4Address $ip -Force
-                Write-Host "Hecho."; Pause
+                $zona = Read-Host " Nombre de la Zona (ej: pecas.com)"
+                $hostName = Read-Host " Nombre del Host (ej: www o @)"
+                $ipAddr = Read-Host " Dirección IP para el registro"
+                
+                # Crear la zona solo si no existe para evitar errores
+                if (-not (Get-DnsServerZone -Name $zona -ErrorAction SilentlyContinue)) {
+                    Write-Host " [*] Creando zona $zona..." -ForegroundColor Cyan
+                    Add-DnsServerPrimaryZone -Name $zona -ZoneFile "$zona.dns" -ErrorAction SilentlyContinue
+                }
+
+                # ALTA: Sin el parametro -Force que causa el error
+                try {
+                    Add-DnsServerResourceRecordA -Name $hostName -ZoneName $zona -IPv4Address $ipAddr -ErrorAction Stop
+                    Write-Host " [OK] Registro '$hostName' creado en '$zona'." -ForegroundColor Green
+                } catch {
+                    Write-Host " [!] Error al crear registro. Revisa que no exista ya." -ForegroundColor Red
+                }
+                Pause
             }
             "2" {
-                $z = Read-Host "Zona"; $h = Read-Host "Host"
-                Remove-DnsServerResourceRecord -ZoneName $z -Name $h -RRType A -Force; Pause
+                $zona = Read-Host " Nombre de la Zona"
+                $hostName = Read-Host " Nombre del Host a eliminar"
+                # BAJA: Aqui el -Force si funciona para no pedir confirmacion
+                Remove-DnsServerResourceRecord -ZoneName $zona -Name $hostName -RRType A -Force
+                Write-Host " [OK] Registro eliminado si existía." -ForegroundColor Yellow
+                Pause
             }
             "3" {
-                $z = Read-Host "Zona"; Get-DnsServerResourceRecord -ZoneName $z | Format-Table; Pause
+                $zona = Read-Host " Zona a consultar"
+                Write-Host " --- Registros en $zona ---" -ForegroundColor Cyan
+                # CONSULTA: Listado limpio
+                Get-DnsServerResourceRecord -ZoneName $zona | Format-Table HostName, RecordType, RecordData -AutoSize
+                Pause
             }
         }
-    } while ($op -ne "4")
+    } while ($abc -ne "4")
 }
 
 # --- 3. CONFIGURACIÓN DHCP (Tu lógica +1) ---
