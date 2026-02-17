@@ -28,75 +28,45 @@ check_red_lista() {
     fi
     return 0
 }
-
-# --- ESTA ES TU FUNCIÓN CON LO NUEVO INTEGRADO ---
 Configurar_DNS(){
     local servicio="bind9"
+    local dominio=""
     local conf_local="/etc/bind/named.conf.local"
+    local interfaz="enp0s8"
+
+    local IP_SRV=$(ip -4 addr show "$interfaz" | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -n1)
+
+    read -p "Ingrese el nombre de dominio: " dominio
+    [[ -z "$dominio" ]] && return 1
+    read -p "IP de DESTINO para $dominio (Enter para usar server $IP_SRV): " ip_dest
+    local IP_FINAL=${ip_dest:-$IP_SRV}
+    echo -e "\n[*] Configurando zona: $dominio -> $IP_FINAL"
     
-    # 1. Asegurar que el servidor ESCUCHE a la red (lo que faltaba para el ping)
-    cat <<EOF > /etc/bind/named.conf.options
-options {
-    directory "/var/cache/bind";
-    listen-on port 53 { any; };
-    allow-query { any; };
-    recursion yes;
+    cat <<EOF >> "$conf_local"
+zone "$dominio" {
+    type master;
+    file "/etc/bind/db.$dominio";
 };
 EOF
 
-    while true; do
-        echo -e "\n--- GESTIÓN DNS ---"
-        echo "1) Listar Dominios"
-        echo "2) Crear Dominio (Cualquier IP)"
-        echo "3) Borrar Dominio"
-        echo "4) Volver"
-        read -p "Opción: " opt_dns
-
-        case $opt_dns in
-            1)
-                echo -e "\n[*] Dominios actuales:"
-                grep "zone" $conf_local | cut -d'"' -f2
-                ;;
-            2)
-                local dominio=""
-                until [[ -n "$dominio" ]]; do
-                    read -p "Nombre de dominio: " dominio
-                done
-
-                local ip_fija=$(ip -4 addr show "$interfaz" | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -n1)
-                
-                # LA IP DE DESTINO: Aquí eliges la que quieras
-                read -p "IP de destino para $dominio (Enter para usar $ip_fija): " ip_user
-                local ip_final=${ip_user:-$ip_fija}
-
-                echo "[*] Configurando $dominio -> $ip_final"
-                
-                # USAR >> PARA NO BORRAR LOS ANTERIORES
-                echo "zone \"$dominio\" { type master; file \"/etc/bind/db.$dominio\"; };" >> $conf_local
-
-                cat <<EOF > /etc/bind/db.$dominio
+    cat <<EOF > "/etc/bind/db.$dominio"
 \$TTL    604800
 @       IN      SOA     ns.$dominio. root.$dominio. ( 1; 604800; 86400; 2419200; 604800 )
+;
 @       IN      NS      ns.$dominio.
-@       IN      A       $ip_final
-ns      IN      A       $ip_fija
-www     IN      A       $ip_final
+@       IN      A       $IP_FINAL
+ns      IN      A       $IP_SRV
+www     IN      CNAME   $dominio.
 EOF
-                systemctl restart "$servicio"
-                echo -e "\e[32m[OK] Configurado.\e[0m"
-                ;;
-            3)
-                read -p "Dominio a borrar: " borrar
-                sed -i "/zone \"$borrar\"/,/};/d" $conf_local
-                rm -f "/etc/bind/db.$borrar"
-                systemctl restart "$servicio"
-                echo "Borrado."
-                ;;
-            4) break ;;
-        esac
-    done
-}
 
+    named-checkconf "$conf_local" && named-checkzone "$dominio" "/etc/bind/db.$dominio"
+    if [ $? -eq 0 ]; then
+        systemctl restart "$servicio"
+        echo -e "\e[32m[OK] Dominio $dominio apunta a $IP_FINAL\e[0m"
+    else
+        echo -e "\e[31m[!] Error de sintaxis.\e[0m"
+    fi
+}
 menu_principal(){
     cargar_dependencias 
     
