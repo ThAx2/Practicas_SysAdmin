@@ -3,51 +3,38 @@
 . "$PSScriptRoot\DHCP.ps1"
 
 if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    Write-Host " [!] ERROR: EJECUTAR COMO ADMINISTRADOR." -ForegroundColor Red
-    Pause; exit
+    Write-Host "EJECUTAR COMO ADMINISTRADOR" -ForegroundColor Red; exit
 }
 
 function Menu-DNS {
-    $IP_SRV = (Get-NetIPAddress -InterfaceAlias "Ethernet" -AddressFamily IPv4).IPAddress | Select-Object -First 1
-    do {
-        Clear-Host
-        Write-Host "--- GESTIÓN DNS (ABC) ---" -ForegroundColor Cyan
-        Write-Host " 1) Consultar Dominios`n 2) Alta de Dominio`n 3) Baja de Dominio`n 4) Volver"
-        $optDns = Read-Host "`n Selecciona una opcion"
-
-        switch ($optDns) {
-            "1" {
-                Get-DnsServerZone | Where-Object { $_.IsReverseLookupZone -eq $false -and $_.ZoneName -ne "TrustAnchors" } | Select-Object ZoneName | Format-Table
-                Pause
-            }
-            "2" {
-                $dom = Read-Host " Dominio"
-                $ip_d = Read-Host " IP Destino (Enter para $IP_SRV)"
-                $final = if ([string]::IsNullOrWhiteSpace($ip_d)) { $IP_SRV } else { $ip_d }
-                Add-DnsServerPrimaryZone -Name $dom -ZoneFile "$dom.dns" -ErrorAction SilentlyContinue
-                Add-DnsServerResourceRecordA -Name "@" -ZoneName $dom -IPv4Address $final -Force
-                Write-Host "[OK] $dom -> $final" -ForegroundColor Green
-                Pause
-            }
-            "3" {
-                $borrar = Read-Host " Dominio a borrar"
-                Remove-DnsServerZone -Name $borrar -Force -ErrorAction SilentlyContinue
-                Write-Host "[OK] Eliminado." -ForegroundColor Green
-                Pause
-            }
+    $IP_S = (Get-NetIPAddress -InterfaceAlias "Ethernet" -AddressFamily IPv4).IPAddress | Select-Object -First 1
+    Write-Host "1) Consultar`n2) Alta`n3) Baja`n4) Volver"
+    $op = Read-Host "Opcion"
+    switch ($op) {
+        "1" { Get-DnsServerZone | Where-Object IsReverseLookupZone -eq $false | Select ZoneName; Pause }
+        "2" {
+            $dom = Read-Host "Dominio"
+            $ip_d = Read-Host "IP Destino (Enter para $IP_S)"
+            $fin = if ([string]::IsNullOrWhiteSpace($ip_d)) { $IP_S } else { $ip_d }
+            Add-DnsServerPrimaryZone -Name $dom -ZoneFile "$dom.dns" -ErrorAction SilentlyContinue
+            Add-DnsServerResourceRecordA -Name "@" -ZoneName $dom -IPv4Address $fin -Force
+            Write-Host "Alta OK" -ForegroundColor Green; Pause
         }
-    } while ($optDns -ne "4")
+        "3" {
+            $b = Read-Host "Dominio a borrar"
+            Remove-DnsServerZone -Name $b -Force -ErrorAction SilentlyContinue
+            Write-Host "Baja OK" -ForegroundColor Green; Pause
+        }
+    }
 }
 
-do {
+while ($true) {
     Clear-Host
-    Write-Host "=== ORQUESTADOR WINDOWSITO ===" -ForegroundColor Yellow
-    Write-Host " 1) Configurar DHCP`n 2) Gestionar DNS`n 3) Estatus`n 4) Salir"
-    $opcion = Read-Host "`n Selecciona"
-
-    switch ($opcion) {
-        "1" { Configurar-DHCP -interface "Ethernet" }
-        "2" { Check-Service -RoleName "DNS" -ServiceName "DNS"; Menu-DNS }
-        "3" { Get-Service DHCPServer, DNS | Select Name, Status; Pause }
-    }
-} while ($opcion -ne "4")
+    Write-Host "=== ORQUESTADOR ==="
+    Write-Host "1) DHCP`n2) DNS`n3) Estatus`n4) Salir"
+    $m = Read-Host "Opcion"
+    if ($m -eq "1") { Configurar-DHCP -interface "Ethernet" }
+    elseif ($m -eq "2") { Check-Service -RoleName "DNS" -ServiceName "DNS"; Menu-DNS }
+    elseif ($m -eq "3") { Get-Service DHCPServer, DNS | Select Name, Status; Pause }
+    elseif ($m -eq "4") { break }
+}
