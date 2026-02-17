@@ -1,68 +1,92 @@
+# Importar módulos hermanos (Asegúrate que estén en la misma carpeta)
+. "$PSScriptRoot\Validacion_IP.ps1"
+. "$PSScriptRoot\Mon_Service.ps1"
+. "$PSScriptRoot\DHCP.ps1"
+
+# Verificación de privilegios
 if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    Write-Host " [!] ERROR: Debes ejecutar este script como ADMINISTRADOR." -ForegroundColor Red
-    Pause
-    exit
+    Write-Host " [!] ERROR: Debes ejecutar como ADMINISTRADOR." -ForegroundColor Red
+    Pause; exit
 }
 
+function Menu-DNS {
+    # Obtener IP actual del servidor para usarla como referencia
+    $IP_SRV = (Get-NetIPAddress -InterfaceAlias "Ethernet" -AddressFamily IPv4).IPAddress | Select-Object -First 1
+
+    do {
+        Clear-Host
+        Write-Host "================================================" -ForegroundColor Cyan
+        Write-Host "           GESTIÓN DNS (ABC) - WINDOWS          " -ForegroundColor Cyan
+        Write-Host "================================================" -ForegroundColor Cyan
+        Write-Host " 1) Mis dominios "
+        Write-Host " 2) Alta de Dominio "
+        Write-Host " 3) Baja de Dominio "
+        Write-Host " 4) Volver al Orquestador"
+        $optDns = Read-Host "`n Selecciona una opcion"
+
+        switch ($optDns) {
+            "1" {
+                Write-Host "`n --- Dominios activos ---" -ForegroundColor Yellow
+                Get-DnsServerZone | Where-Object { $_.IsReverseLookupZone -eq $false -and $_.ZoneName -ne "TrustAnchors" } | Select-Object ZoneName, ZoneType | Format-Table -AutoSize
+                Pause
+            }
+            "2" {
+                $dominio = Read-Host " Nombre del nuevo dominio (ej. pecas.com)"
+                if ([string]::IsNullOrWhiteSpace($dominio)) { continue }
+
+                # IP de Destino: Aquí puedes poner la .20, la .23 o la que sea
+                $ip_dest = Read-Host " IP de DESTINO para $dominio (Enter para $IP_SRV)"
+                $IP_FINAL = if ([string]::IsNullOrWhiteSpace($ip_dest)) { $IP_SRV } else { $ip_dest }
+
+                if (Test-IsValidIP -IP $IP_FINAL) {
+                    Write-Host " [*] Creando Zona y Registros..." -ForegroundColor Magenta
+                    Add-DnsServerPrimaryZone -Name $dominio -ZoneFile "$dominio.dns" -ErrorAction SilentlyContinue
+                    
+                    # Registro @ (A) y www (CNAME)
+                    Add-DnsServerResourceRecordA -Name "@" -ZoneName $dominio -IPv4Address $IP_FINAL -Force
+                    Add-DnsServerResourceRecordCName -Name "www" -ZoneName $dominio -HostNameAlias "$dominio." -Force
+                    
+                    Write-Host " [OK] Dominio $dominio apunta a $IP_FINAL" -ForegroundColor Green
+                }
+                Pause
+            }
+            "3" {
+                $borrar = Read-Host " Nombre del dominio a eliminar"
+                if (Get-DnsServerZone -Name $borrar -ErrorAction SilentlyContinue) {
+                    Remove-DnsServerZone -Name $borrar -Force
+                    Write-Host " [OK] Zona $borrar eliminada correctamente." -ForegroundColor Green
+                } else {
+                    Write-Host " [!] La zona no existe." -ForegroundColor Red
+                }
+                Pause
+            }
+        }
+    } while ($optDns -ne "4")
+}
+
+# --- MENU PRINCIPAL DEL ORQUESTADOR ---
 do {
     Clear-Host
     Write-Host "================================================" -ForegroundColor Yellow
-    Write-Host "        DNS          " -ForegroundColor Yellow
+    Write-Host "       ORQUESTADOR MAESTRO WINDOWSITO           " -ForegroundColor Yellow
     Write-Host "================================================" -ForegroundColor Yellow
-    Write-Host " 1) Configurar servidor DHCP"
-    Write-Host " 2) Configurar servidor DNS"
-    Write-Host " 3) Configuracion de Red Manual"
-    Write-Host " 4) Estatus de servicios"
-    Write-Host " 5) Salir"
-
+    Write-Host " 1) Configurar DHCP (IP Fija y Ambito)"
+    Write-Host " 2) Gestionar DNS (Altas/Bajas/Consultas)"
+    Write-Host " 3) Ver Estatus de Servicios"
+    Write-Host " 4) Salir"
     $opcion = Read-Host "`n Selecciona una opcion"
-    
+
     switch ($opcion) {
-        "1" {
-            Check-Service -ServiceName "DHCPServer"
-            $interface = Read-Host " Nombre de la Interfaz (ej. Ethernet)"
-            
-            do { $mask = Read-Host " Mascara de Subred" } until (Test-IsValidIP -IP $mask -Tipo "mask")
-            do { $ip_i = Read-Host " IP Inicial Sera la IP Servidor " } until (Test-IsValidIP -IP $ip_i -Tipo "host")
-            
-            $octs = $ip_i.Split('.')
-            $base_red = "$($octs[0..2] -join '.').0"
-            
-            do { $ip_f = Read-Host " Rango Final (>= $ip_i)" } until (Test-IsValidIP -IP $ip_f -IPReferencia $ip_i -Tipo "rango")
-            
-            $scopeName = Read-Host " Nombre para el Ambito"
-	    do {
-		$lease_seconds = Read-Host " Tiempo de concesion"
-	    } while ($lease_seconds -notmatch '^[0-9]+$' -or [int]$lease_seconds -le 0) 
-            $gw = Read-Host " Puerta de enlace (Enter para omitir)"
-            $dns = Read-Host " Servidor DNS (Enter para omitir)"
-
-            # Lógica de Desplazamiento +1
-            $rango_real_inicio = "$($octs[0..2] -join '.').$([int]$octs[3] + 1)"
-            $octsF = $ip_f.Split('.')
-            $rango_real_final = "$($octsF[0..2] -join '.').$([int]$octsF[3] + 1)"
-
-            Write-Host "`n [+] Configurando IP Fija $ip_i..." -ForegroundColor Cyan
-            Remove-NetIPAddress -InterfaceAlias $interface -Confirm:$false -ErrorAction SilentlyContinue
-            New-NetIPAddress -InterfaceAlias $interface -IPAddress $ip_i -PrefixLength 24 -ErrorAction SilentlyContinue | Out-Null
-
-            Write-Host " [+] Creando Ambito DHCP en $base_red..." -ForegroundColor Cyan
-            Remove-DhcpServerv4Scope -ScopeId $base_red -Force -ErrorAction SilentlyContinue
-            Add-DhcpServerv4Scope -Name $scopeName -StartRange $rango_real_inicio -EndRange $rango_real_final -SubnetMask $mask -LeaseDuration (New-TimeSpan -Seconds $lease_seconds) -State Active
-            
-            if ($gw) { Set-DhcpServerv4OptionValue -ScopeId $base_red -OptionId 3 -Value $gw }
-            if ($dns) { Set-DhcpServerv4OptionValue -ScopeId $base_red -OptionId 6 -Value $dns }
-
-            Write-Host "`n [OK] Servidor en $ip_i | DHCP: $rango_real_inicio - $rango_real_final" -ForegroundColor Green
+        "1" { Configurar-DHCP -interface "Ethernet" }
+        "2" { 
+            Check-Service -RoleName "DNS" -ServiceName "DNS"
+            Menu-DNS 
+        }
+        "3" {
+            Write-Host "`n--- ESTATUS ---" -ForegroundColor Cyan
+            Get-Service DHCPServer, DNS | Select-Object Name, DisplayName, Status | Format-Table -AutoSize
+            Get-NetIPAddress -InterfaceAlias "Ethernet" -AddressFamily IPv4 | Select-Object IPAddress, PrefixLength
             Pause
         }
-        "2" {
-            Write-Host "`n --- AMBITOS ---" -ForegroundColor Cyan
-            Get-DhcpServerv4Scope | Select-Object ScopeId, Name, StartRange, EndRange, State | Format-Table -AutoSize
-            Write-Host " --- CONCESIONES ---" -ForegroundColor Cyan
-            Get-DhcpServerv4Scope | ForEach-Object { Get-DhcpServerv4Lease -ScopeId $_.ScopeId } | Format-Table -AutoSize
-            Pause
-        }
-        "3" { Restart-Service DHCPServer; Write-Host " [+] Servicio reiniciado."; Pause }
     }
 } while ($opcion -ne "4")
