@@ -1,91 +1,257 @@
-# --- 1. PREPARACIÓN Y CARGA DE MÓDULOS ---
-# Esto evita el error rojo de "command not found"
-Import-Module DhcpServer -ErrorAction SilentlyContinue
-Import-Module DnsServer -ErrorAction SilentlyContinue
+# -------------------------------
+# COMPROBAR ADMIN
+# -------------------------------
+$currentPrincipal = New-Object Security.Principal.WindowsPrincipal(
+    [Security.Principal.WindowsIdentity]::GetCurrent()
+)
+if (-not $currentPrincipal.IsInRole(
+    [Security.Principal.WindowsBuiltInRole]::Administrator)) {
 
+    Write-Host "[!] Ejecuta como Administrador" -ForegroundColor Red
+    pause
+    exit
+}
+
+# -------------------------------
+# INSTALACION FORZADA
+# -------------------------------
+function Forzar-Instalacion {
+    param($NombrePS, $NombreDISM)
+
+    Write-Host "`n[+] Verificando $NombrePS..." -ForegroundColor Cyan
+
+    if (-not (Get-WindowsFeature $NombrePS).Installed) {
+        Write-Host "[*] Instalando por DISM..." -ForegroundColor Yellow
+        dism /online /enable-feature /featurename:$NombreDISM /all /norestart | Out-Null
+    }
+}
+
+# -------------------------------
+# MENU DNS CON DIRECTA + INVERSA
+# -------------------------------
 function Menu-DNS {
+
+    Forzar-Instalacion -NombrePS "DNS" -NombreDISM "DNS-Server-Full-Role"
+
     do {
         Clear-Host
-        Write-Host "=== GESTIÓN DNS: DIRECTA + WWW + INVERSA ===" -ForegroundColor Yellow
-        Write-Host " 1) ALTA Dominio (Crea todo automáticamente)"
-        Write-Host " 2) BAJA Dominio"
-        Write-Host " 3) CONSULTA de Zonas"
-        Write-Host " 4) Volver"
-        $opt = Read-Host " Opción"
+        Write-Host "=== GESTION DNS COMPLETA ===" -ForegroundColor Cyan
+        Write-Host "1) Alta (A + www + raiz + PTR)"
+        Write-Host "2) Baja (A + PTR)"
+        Write-Host "3) Consulta completa"
+        Write-Host "4) Volver"
 
-        switch ($opt) {
+        $op = Read-Host "Opcion"
+
+        switch ($op) {
+
+            # -------------------------------
+            # ALTA
+            # -------------------------------
             "1" {
-                $zona = Read-Host " Dominio (ej: lol.com)"
-                $ip = Read-Host " IP Destino (ej: 192.168.100.30)"
-                
-                # Crear Zona Directa si no existe
+
+                $zona = Read-Host "Zona directa (ej: pecas.local)"
+                $host = Read-Host "Host principal (ej: servidor o @)"
+                $ip   = Read-Host "IP"
+
+                # ----- ZONA DIRECTA -----
                 if (-not (Get-DnsServerZone -Name $zona -ErrorAction SilentlyContinue)) {
                     Add-DnsServerPrimaryZone -Name $zona -ZoneFile "$zona.dns"
                 }
 
-                # Crear Zona Inversa (Corrige el error de 'No response from server')
-                $octetos = $ip.Split('.')
-                $redInv = "$($octetos[2]).$($octetos[1]).$($octetos[0]).in-addr.arpa"
-                if (-not (Get-DnsServerZone -Name $redInv -ErrorAction SilentlyContinue)) {
-                    Add-DnsServerPrimaryZone -NetworkId "$($octetos[0]).$($octetos[1]).$($octetos[2]).0/24" -ReplicationScope "Forest"
+                # A del host
+                if ($host -ne "@") {
+                    Add-DnsServerResourceRecordA `
+                        -Name $host `
+                        -ZoneName $zona `
+                        -IPv4Address $ip `
+                        -ErrorAction SilentlyContinue
                 }
 
-                # Registros A (Raíz y WWW) - Sin parámetros extra que den error
-                Add-DnsServerResourceRecordA -Name "@" -ZoneName $zona -IPv4Address $ip -ErrorAction SilentlyContinue
-                Add-DnsServerResourceRecordA -Name "www" -ZoneName $zona -IPv4Address $ip -ErrorAction SilentlyContinue
-                
-                # Registro PTR (Reversa)
-                Add-DnsServerResourceRecordPointer -Name $octetos[3] -ZoneName $redInv -PtrDomainName "$zona." -ErrorAction SilentlyContinue
-                
-                Write-Host " [OK] Dominio y Reversa configurados." -ForegroundColor Green
-                Pause
+                # A para la raiz
+                Add-DnsServerResourceRecordA `
+                    -Name "@" `
+                    -ZoneName $zona `
+                    -IPv4Address $ip `
+                    -ErrorAction SilentlyContinue
+
+                # A para www
+                Add-DnsServerResourceRecordA `
+                    -Name "www" `
+                    -ZoneName $zona `
+                    -IPv4Address $ip `
+                    -ErrorAction SilentlyContinue
+
+
+                # ----- ZONA INVERSA -----
+                $oct = $ip.Split('.')
+                $network = "$($oct[0]).$($oct[1]).$($oct[2]).0/24"
+                $reverseZone = "$($oct[2]).$($oct[1]).$($oct[0]).in-addr.arpa"
+
+                if (-not (Get-DnsServerZone -Name $reverseZone -ErrorAction SilentlyContinue)) {
+                    Add-DnsServerPrimaryZone -NetworkId $network
+                }
+
+                # PTR
+                Add-DnsServerResourceRecordPtr `
+                    -Name $oct[3] `
+                    -ZoneName $reverseZone `
+                    -PtrDomainName "$zona." `
+                    -ErrorAction SilentlyContinue
+
+                Write-Host "`n[OK] A, www, raiz y PTR creados." -ForegroundColor Green
+                pause
             }
+
+            # -------------------------------
+            # BAJA
+            # -------------------------------
             "2" {
-                $z = Read-Host " Nombre de la zona a borrar"
-                Remove-DnsServerZone -Name $z -Force
-                Pause
+
+                $zona = Read-Host "Zona directa"
+                $host = Read-Host "Host a borrar"
+                $ip   = Read-Host "IP del host"
+
+                if ($host -ne "@") {
+                    Remove-DnsServerResourceRecord `
+                        -ZoneName $zona `
+                        -Name $host `
+                        -RRType A `
+                        -Force `
+                        -ErrorAction SilentlyContinue
+                }
+
+                Remove-DnsServerResourceRecord `
+                    -ZoneName $zona `
+                    -Name "www" `
+                    -RRType A `
+                    -Force `
+                    -ErrorAction SilentlyContinue
+
+                Remove-DnsServerResourceRecord `
+                    -ZoneName $zona `
+                    -Name "@" `
+                    -RRType A `
+                    -Force `
+                    -ErrorAction SilentlyContinue
+
+                $oct = $ip.Split('.')
+                $reverseZone = "$($oct[2]).$($oct[1]).$($oct[0]).in-addr.arpa"
+
+                Remove-DnsServerResourceRecord `
+                    -ZoneName $reverseZone `
+                    -Name $oct[3] `
+                    -RRType PTR `
+                    -Force `
+                    -ErrorAction SilentlyContinue
+
+                Write-Host "[OK] Registros eliminados." -ForegroundColor Yellow
+                pause
             }
+
+            # -------------------------------
+            # CONSULTA COMPLETA
+            # -------------------------------
             "3" {
-                Get-DnsServerZone | Where-Object { $_.IsAutoCreated -eq $false } | ft ZoneName, ZoneStatus
-                Pause
+
+                Clear-Host
+
+                Write-Host "`n--- ZONAS DIRECTAS ---" -ForegroundColor Cyan
+
+                Get-DnsServerZone |
+                Where-Object { $_.IsReverseLookupZone -eq $false } |
+                ForEach-Object {
+
+                    Write-Host "`nZona: $($_.ZoneName)" -ForegroundColor Yellow
+                    Get-DnsServerResourceRecord -ZoneName $_.ZoneName |
+                    Format-Table HostName,RecordType,RecordData -AutoSize
+                }
+
+                Write-Host "`n--- ZONAS INVERSAS ---" -ForegroundColor Cyan
+
+                Get-DnsServerZone |
+                Where-Object { $_.IsReverseLookupZone -eq $true } |
+                ForEach-Object {
+
+                    Write-Host "`nZona: $($_.ZoneName)" -ForegroundColor Yellow
+                    Get-DnsServerResourceRecord -ZoneName $_.ZoneName |
+                    Format-Table HostName,RecordType,RecordData -AutoSize
+                }
+
+                pause
             }
         }
-    } while ($opt -ne "4")
+
+    } while ($op -ne "4")
 }
 
-function Configurar-DHCP {
-    # Limpiar ámbitos antiguos (como el 103.5.93.0) para evitar conflictos
-    Write-Host " [*] Purgando ámbitos antiguos..." -ForegroundColor Cyan
-    Get-DhcpServerv4Scope | Remove-DhcpServerv4Scope -Force -ErrorAction SilentlyContinue
+# -------------------------------
+# DHCP (tu version)
+# -------------------------------
+function Ejecutar-DHCP {
 
-    $ip_srv = Read-Host " IP Estática para el Servidor (Ethernet 2)"
-    $ip_fin = Read-Host " IP Final del Rango DHCP"
-    
-    # Configurar la tarjeta interna (Ethernet 2)
-    New-NetIPAddress -InterfaceAlias "Ethernet 2" -IPAddress $ip_srv -PrefixLength 24 -ErrorAction SilentlyContinue | Out-Null
-    
-    # Crear el ámbito nuevo
-    $red = $ip_srv.SubString(0, $ip_srv.LastIndexOf('.')) + ".0"
-    $inicio = $ip_srv.SubString(0, $ip_srv.LastIndexOf('.')) + "." + ([int]$ip_srv.Split('.')[3] + 1)
-    
-    Add-DhcpServerv4Scope -Name "Red_Interna" -StartRange $inicio -EndRange $ip_fin -SubnetMask 255.255.255.0 -State Active
-    Set-DhcpServerv4OptionValue -ScopeId $red -OptionId 6 -Value $ip_srv # DNS para clientes
-    
-    Write-Host " [OK] DHCP configurado y limpio en Ethernet 2." -ForegroundColor Green
-    Pause
+    Forzar-Instalacion -NombrePS "DHCP" -NombreDISM "DHCPServer"
+
+    $int  = Read-Host "Interfaz (ej. Ethernet 2)"
+    $ip_s = Read-Host "IP del servidor"
+    $ip_f = Read-Host "IP final del rango"
+    $dns  = Read-Host "DNS para clientes (Enter para omitir)"
+
+    $base = $ip_s.Substring(0,$ip_s.LastIndexOf('.')) + ".0"
+
+    $r_i = $ip_s.Substring(0,$ip_s.LastIndexOf('.')) + "." +
+           ([int]$ip_s.Split('.')[3] + 1)
+
+    $r_f = $ip_f.Substring(0,$ip_f.LastIndexOf('.')) + "." +
+           ([int]$ip_f.Split('.')[3] + 1)
+
+    New-NetIPAddress `
+        -InterfaceAlias $int `
+        -IPAddress $ip_s `
+        -PrefixLength 24 `
+        -ErrorAction SilentlyContinue | Out-Null
+
+    if (Get-Command Add-DhcpServerv4Scope -ErrorAction SilentlyContinue) {
+
+        Remove-DhcpServerv4Scope -ScopeId $base -Force -ErrorAction SilentlyContinue
+
+        Add-DhcpServerv4Scope `
+            -Name "Red_Pecas" `
+            -StartRange $r_i `
+            -EndRange $r_f `
+            -SubnetMask 255.255.255.0 `
+            -State Active
+
+        if ($dns) {
+            Set-DhcpServerv4OptionValue `
+                -ScopeId $base `
+                -OptionId 6 `
+                -Value $dns
+        }
+
+        Write-Host "[OK] DHCP configurado." -ForegroundColor Green
+    }
+    else {
+        Write-Host "[!] Error cargando modulo DHCP." -ForegroundColor Red
+    }
+
+    pause
 }
 
-# --- MENÚ PRINCIPAL ---
+# -------------------------------
+# MENU PRINCIPAL
+# -------------------------------
 do {
     Clear-Host
-    Write-Host "========================================" -ForegroundColor Cyan
-    Write-Host "   GESTOR DE SERVICIOS WINDOWS 2022     " -ForegroundColor Cyan
-    Write-Host "========================================" -ForegroundColor Cyan
-    Write-Host " 1) DHCP (Limpieza y Configuración)"
-    Write-Host " 2) DNS (Zonas Directas, WWW e Inversas)"
-    Write-Host " 3) Salir"
-    $main = Read-Host " Selección"
+    Write-Host "===== GESTOR TOTAL =====" -ForegroundColor Cyan
+    Write-Host "1) DHCP"
+    Write-Host "2) DNS (directa + inversa)"
+    Write-Host "3) Salir"
 
-    if ($main -eq "1") { Configurar-DHCP }
-    if ($main -eq "2") { Menu-DNS }
-} while ($main -ne "3")
+    $m = Read-Host "Opcion"
+
+    if ($m -eq "1") { Ejecutar-DHCP }
+    if ($m -eq "2") { Menu-DNS }
+
+} while ($m -ne "3")
+
