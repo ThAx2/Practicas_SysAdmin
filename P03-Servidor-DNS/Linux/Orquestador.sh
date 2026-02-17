@@ -1,9 +1,4 @@
 #!/bin/bash
-# Orquestador Maestro - VERSIÓN INTEGRADA FINAL
-
-# ===========================================================================
-# Script: Orquestador Maestro Modular (DNS / DHCP / RED)
-# ===========================================================================
 
 cargar_dependencias() {
     export interfaz="enp0s8"
@@ -16,7 +11,6 @@ cargar_dependencias() {
         source "$P02_DIR/DHCP.sh"
         return 0
     else
-        echo -e "\e[31m[!] Error: No se encontró la carpeta P02.\e[0m"
         exit 1
     fi
 }
@@ -28,31 +22,37 @@ check_red_lista() {
     fi
     return 0
 }
+
 Configurar_DNS(){
     local servicio="bind9"
-    local dominio=""
     local conf_local="/etc/bind/named.conf.local"
     local interfaz="enp0s8"
-
     local IP_SRV=$(ip -4 addr show "$interfaz" | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -n1)
 
-    read -p "Ingrese el nombre de dominio: " dominio
-    [[ -z "$dominio" ]] && return 1
+    while true; do
+        echo -e "\n------------------------------------"
+        echo "        MODULO GESTIÓN DNS          "
+        echo "------------------------------------"
+        echo "1) Listar Dominios (Consulta)"
+        echo "2) Crear Nuevo Dominio (Alta)"
+        echo "3) Borrar Dominio (Baja)"
+        echo "4) Volver al Orquestador"
+        read -p "Opción: " opt_dns
 
-    read -p "IP de DESTINO para $dominio (Enter para usar server $IP_SRV): " ip_dest
-    local IP_FINAL=${ip_dest:-$IP_SRV}
+        case $opt_dns in
+            1)
+                grep "zone" "$conf_local" | cut -d'"' -f2 || echo "No hay dominios."
+                ;;
+            2)
+                read -p "Nombre del dominio: " dominio
+                [[ -z "$dominio" ]] && continue
+                read -p "IP de DESTINO (Enter para $IP_SRV): " ip_dest
+                local IP_FINAL=${ip_dest:-$IP_SRV}
+                
+                sed -i "/zone \"$dominio\"/,/};/d" "$conf_local"
+                echo "zone \"$dominio\" { type master; file \"/etc/bind/db.$dominio\"; };" >> "$conf_local"
 
-    echo -e "\n[*] Configurando zona: $dominio -> $IP_FINAL"
-    
-    sed -i "/zone \"$dominio\"/,/};/d" "$conf_local"
-    cat <<EOF >> "$conf_local"
-zone "$dominio" {
-    type master;
-    file "/etc/bind/db.$dominio";
-};
-EOF
-
-    cat <<EOF > "/etc/bind/db.$dominio"
+                cat <<EOF > "/etc/bind/db.$dominio"
 \$TTL 604800
 @ IN SOA ns.$dominio. root.$dominio. ( 1 604800 86400 2419200 604800 )
 @ IN NS ns.$dominio.
@@ -60,19 +60,27 @@ EOF
 ns IN A $IP_SRV
 www IN A $IP_FINAL
 EOF
-
-    named-checkconf "$conf_local" && named-checkzone "$dominio" "/etc/bind/db.$dominio"
-    
-    if [ $? -eq 0 ]; then
-        systemctl restart "$servicio"
-        echo -e "\e[32m[OK] Servidor y dominio $dominio configurados.\e[0m"
-    else
-        echo -e "\e[31m[!] Error de sintaxis en el archivo de zona.\e[0m"
-    fi
+                if named-checkconf "$conf_local" && named-checkzone "$dominio" "/etc/bind/db.$dominio"; then
+                    systemctl restart "$servicio"
+                    echo -e "\e[32m[OK] Alta exitosa.\e[0m"
+                else
+                    echo -e "\e[31m[!] Error de sintaxis.\e[0m"
+                fi
+                ;;
+            3)
+                read -p "Dominio a eliminar: " borrar
+                sed -i "/zone \"$borrar\"/,/};/d" "$conf_local"
+                rm -f "/etc/bind/db.$borrar"
+                systemctl restart "$servicio"
+                echo -e "\e[32m[OK] Baja exitosa.\e[0m"
+                ;;
+            4) return 0 ;;
+        esac
+    done
 }
+
 menu_principal(){
     cargar_dependencias 
-    
     while true; do
         echo -e "\n===================================="
         echo "      ORQUESTADOR MULTIMÓDULO       "
@@ -100,6 +108,5 @@ menu_principal(){
     done
 }
 
-# --- EJECUCIÓN ---
 [[ $EUID -ne 0 ]] && echo "Ejecutar con sudo" && exit 1
 menu_principal
