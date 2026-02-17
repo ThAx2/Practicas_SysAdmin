@@ -1,105 +1,114 @@
+# --- 1. VERIFICACIÓN DE ADMINISTRADOR (Tu código) ---
 if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    Write-Host " [!] ERROR: Debes ejecutar este script como ADMINISTRADOR." -ForegroundColor Red
-    Pause
-    exit
+    Write-Host " [!] ERROR: Ejecuta como ADMINISTRADOR." -ForegroundColor Red; Pause; exit
 }
 
-# --- FUNCIÓN DE VALIDACIÓN (Tu lógica intacta) ---
+# --- 2. VALIDACIÓN DE IP (Tu lógica completa, corregida para .303 y vacíos) ---
 function Test-IsValidIP {
-    param([string]$IP, $IPReferencia = $null, [string]$Tipo = "host")
-    if ([string]::IsNullOrWhiteSpace($IP)) { return $false }
-    $IP = $IP.Trim()
+    param([string]$IP, $IPReferencia = $null, [string]$Tipo = "host", [switch]$PermitirVacio)
+    if ([string]::IsNullOrWhiteSpace($IP)) { return $PermitirVacio }
     $regex = '^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$'
     if ($IP -match $regex) {
         $octetos = $IP.Split('.'); $ultimo = [int]$octetos[3]; $primero = [int]$octetos[0]
-        $prohibidas = @("0.0.0.0", "1.0.0.0", "127.0.0.1", "255.255.255.255")
-        if ($prohibidas -contains $IP -or $primero -eq 127 -or $primero -eq 0) { return $false }
+        if (@("0.0.0.0", "127.0.0.1", "255.255.255.255") -contains $IP -or $primero -eq 127) { return $false }
         switch ($Tipo) {
-            "mask" {
-                $masksValidas = @("255.0.0.0", "255.255.0.0", "255.255.255.0", "255.255.255.192", "255.255.255.240") # Simplificado para el ejemplo
-                if ($masksValidas -notcontains $IP) { return $false }
-            }
-            { $_ -eq "host" -or $_ -eq "rango" } { if ($ultimo -eq 255) { return $false } }
+            "mask" { if (@("255.0.0.0", "255.255.0.0", "255.255.255.0") -notcontains $IP) { return $false } }
+            "host" { if ($ultimo -eq 255 -or $ultimo -eq 0) { return $false } }
+        }
+        if ($null -ne $IPReferencia) {
+            if ($octetos[0..2] -join '.' -ne ($IPReferencia.Split('.')[0..2] -join '.')) { return $false }
         }
         return $true
     }
     return $false
 }
-
-# --- REPARACIÓN Y CARGA DE ROL (Aquí estaba el fallo) ---
 function Check-Service {
     param($ServiceName)
     Write-Host "`n [+] Verificando Rol DHCP..." -ForegroundColor Cyan
+    $feature = Get-WindowsFeature DHCP
     
-    # Si el comando no existe, es que el rol no está instalado de verdad
-    if (-not (Get-Command Add-DhcpServerv4Scope -ErrorAction SilentlyContinue)) {
-        Write-Host " [!] Rol no detectado o corrupto. Forzando instalacion con DISM..." -ForegroundColor Yellow
-        
-        # PASO CLAVE: DISM ignora el error 0x800f081f de archivos de origen en muchos casos
-        dism /online /enable-feature /featurename:DHCPServer /all /norestart | Out-Null
-        
-        # Si aun así no carga, intentamos la reparación de imagen
-        if (-not (Get-Command Add-DhcpServerv4Scope -ErrorAction SilentlyContinue)) {
-            Write-Host " [*] Reparando almacen de componentes..." -ForegroundColor Magenta
-            dism /online /cleanup-image /restorehealth | Out-Null
+    if ($feature.Installed) {
+        Write-Host " [!] El Rol DHCP ya está instalado." -ForegroundColor Yellow
+        $confirm = Read-Host "¿Deseas REINSTALARLO por completo (limpieza profunda)? (s/n)"
+        if ($confirm -match "[Ss]") {
+            Write-Host " [*] Eliminando Rol y configuraciones previas..." -ForegroundColor Magenta
+            Uninstall-WindowsFeature DHCP -Remove -IncludeManagementTools | Out-Null
+            Write-Host " [*] Reinstalando Rol DHCP..." -ForegroundColor Magenta
             Install-WindowsFeature DHCP -IncludeManagementTools | Out-Null
         }
+    } else {
+        Write-Host " [!] Instalando Rol DHCP y herramientas..." -ForegroundColor Yellow
+        Install-WindowsFeature DHCP -IncludeManagementTools | Out-Null
     }
 
-    # Intentar arrancar el servicio
-    $svc = Get-Service $ServiceName -ErrorAction SilentlyContinue
-    if ($null -eq $svc) {
-        Write-Host " [!] ERROR CRITICO: El servicio no se pudo instalar." -ForegroundColor Red
-        Pause; exit
+    if ((Get-Service $ServiceName).Status -ne 'Running') {
+        Start-Service $ServiceName
     }
-    if ($svc.Status -ne 'Running') { Start-Service $ServiceName }
 }
 
-# --- MENU PRINCIPAL (Tu lógica intacta) ---
+
+# --- 4. EL PUTO ABC DE DNS ---
+function Menu-DNS-ABC {
+    Check-Feature -Nombre "DNS"
+    do {
+        Clear-Host
+        Write-Host "--- ABC DE DNS ---" -ForegroundColor Cyan
+        Write-Host " 1) Alta (Crear Zona y Registro A)`n 2) Baja (Eliminar Registro/Zona)`n 3) Consulta (Ver Registros)`n 4) Volver"
+        $abc = Read-Host " Seleccion"
+        switch ($abc) {
+            "1" {
+                $zona = Read-Host " Nombre de Zona (ej. pecas.com)"
+                $host = Read-Host " Nombre Host (ej. www o @)"
+                $ip = Read-Host " IP del Host"
+                Add-DnsServerPrimaryZone -Name $zona -ZoneFile "$zona.dns" -ErrorAction SilentlyContinue
+                Add-DnsServerResourceRecordA -Name $host -ZoneName $zona -IPv4Address $ip -Force
+                Write-Host " [OK] Alta exitosa."; Pause
+            }
+            "2" {
+                $zona = Read-Host " Zona"; $host = Read-Host " Host"
+                Remove-DnsServerResourceRecord -ZoneName $zona -Name $host -RRType A -Force
+                Write-Host " [OK] Registro eliminado."; Pause
+            }
+            "3" {
+                $zona = Read-Host " Zona a consultar"
+                Get-DnsServerResourceRecord -ZoneName $zona | Format-Table -AutoSize; Pause
+            }
+        }
+    } while ($abc -ne "4")
+}
+
+# --- 5. CONFIGURACIÓN DHCP (Tu lógica con Desplazamiento +1) ---
+function Ejecutar-DHCP {
+    Check-Feature -Nombre "DHCP"
+    $int = Read-Host " Interfaz (ej. Ethernet)"
+    do { $mask = Read-Host " Mascara" } until (Test-IsValidIP $mask -Tipo "mask")
+    do { $ip_i = Read-Host " IP Servidor" } until (Test-IsValidIP $ip_i -Tipo "host")
+    do { $ip_f = Read-Host " Rango Final" } until (Test-IsValidIP $ip_f -IPReferencia $ip_i)
+    
+    $gw = Read-Host " Gateway (Enter para saltar)"; $dns = Read-Host " DNS (Enter para saltar)"
+    $octs = $ip_i.Split('.'); $base = "$($octs[0..2] -join '.').0"
+    
+    # Tu lógica +1
+    $r_i = "$($octs[0..2] -join '.').$([int]$octs[3] + 1)"
+    $r_f = "$($ip_f.Split('.')[0..2] -join '.').$([int]$ip_f.Split('.')[3] + 1)"
+
+    New-NetIPAddress -InterfaceAlias $int -IPAddress $ip_i -PrefixLength 24 -ErrorAction SilentlyContinue | Out-Null
+    Remove-DhcpServerv4Scope -ScopeId $base -Force -ErrorAction SilentlyContinue
+    Add-DhcpServerv4Scope -Name "Ambito_Pecas" -StartRange $r_i -EndRange $r_f -SubnetMask $mask -State Active
+    
+    if ($gw -and (Test-IsValidIP $gw)) { Set-DhcpServerv4OptionValue -ScopeId $base -OptionId 3 -Value $gw }
+    if ($dns -and (Test-IsValidIP $dns)) { Set-DhcpServerv4OptionValue -ScopeId $base -OptionId 6 -Value $dns }
+    Write-Host " [OK] DHCP Configurado."; Pause
+}
+
+# --- MENÚ PRINCIPAL UNIDO ---
 do {
     Clear-Host
-    Write-Host "================================================" -ForegroundColor Yellow
-    Write-Host "         DHCP WINDOWSITO REPARADO          " -ForegroundColor Yellow
-    Write-Host "================================================" -ForegroundColor Yellow
-    Write-Host " 1) Configurar Servidor (IP Fija y Ambito)"
-    Write-Host " 2) Ver Ambitos y Concesiones"
-    Write-Host " 3) Reiniciar Servicio DHCP"
-    Write-Host " 4) Salir"
-    $opcion = Read-Host "`n Selecciona una opcion"
-    
-    switch ($opcion) {
-        "1" {
-            Check-Service -ServiceName "DHCPServer"
-            $interface = Read-Host " Nombre de la Interfaz (ej. Ethernet)"
-            do { $mask = Read-Host " Mascara de Subred" } until (Test-IsValidIP -IP $mask -Tipo "mask")
-            do { $ip_i = Read-Host " IP Servidor" } until (Test-IsValidIP -IP $ip_i -Tipo "host")
-            
-            $octs = $ip_i.Split('.')
-            $base_red = "$($octs[0..2] -join '.').0"
-            do { $ip_f = Read-Host " Rango Final" } until (Test-IsValidIP -IP $ip_f -IPReferencia $ip_i -Tipo "rango")
-            
-            $scopeName = Read-Host " Nombre del Ambito"
-            do { $lease = Read-Host " Segundos de concesion" } while ($lease -notmatch '^[0-9]+$')
-
-            # Lógica de Desplazamiento
-            $r_inicio = "$($octs[0..2] -join '.').$([int]$octs[3] + 1)"
-            $octsF = $ip_f.Split('.')
-            $r_final = "$($octsF[0..2] -join '.').$([int]$octsF[3] + 1)"
-
-            Write-Host " [+] Configurando Red..." -ForegroundColor Cyan
-            New-NetIPAddress -InterfaceAlias $interface -IPAddress $ip_i -PrefixLength 24 -ErrorAction SilentlyContinue | Out-Null
-
-            Write-Host " [+] Creando Ambito..." -ForegroundColor Cyan
-            Remove-DhcpServerv4Scope -ScopeId $base_red -Force -ErrorAction SilentlyContinue
-            Add-DhcpServerv4Scope -Name $scopeName -StartRange $r_inicio -EndRange $r_final -SubnetMask $mask -LeaseDuration (New-TimeSpan -Seconds $lease) -State Active
-            
-            Write-Host "`n [OK] DHCP Activo en $r_inicio - $r_final" -ForegroundColor Green
-            Pause
-        }
-        "2" {
-            Get-DhcpServerv4Scope | Select-Object ScopeId, Name, State | Format-Table -AutoSize
-            Pause
-        }
-        "3" { Restart-Service DHCPServer; Pause }
+    Write-Host "=== GESTOR WINDOWSITO (DHCP + DNS ABC) ===" -ForegroundColor Yellow
+    Write-Host " 1) DHCP (Con IP Fija y Desplazamiento)`n 2) DNS (ABC COMPLETO)`n 3) Salir"
+    $op = Read-Host " Selecciona"
+    switch ($op) {
+        "1" { Ejecutar-DHCP }
+        "2" { Menu-DNS-ABC }
     }
-} while ($opcion -ne "4")
+} while ($op -ne "3")
