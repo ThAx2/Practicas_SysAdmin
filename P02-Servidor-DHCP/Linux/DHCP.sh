@@ -1,14 +1,9 @@
 #!/bin/bash
 #source "./Validar_Red.sh"
 #source "./mon_service.sh"
-
-
 configurar_dhcp() {
-
     base_ip=""; mask=""; ip_i=""; ip_f=""; lease_time=""; gateway=""; dns_server=""; scope=""
-    
     mon_service $servicio
-    
     echo -e "\n--- Configuración de Ámbito DHCP ---"
     read -p "Nombre del Ámbito: " scope
     while [[ -z "$scope" ]]; do
@@ -19,7 +14,6 @@ configurar_dhcp() {
     until valid_ip "$mask" "" "mask"; do 
         read -p "Máscara de Subred (ej. 255.255.255.0): " mask
     done
-
     while true; do
         read -p "IP del Servidor (IP Fija): " ip_i
         if [[ "$ip_i" == "0.0.0.0" || "$ip_i" == "127.0.0.1" || "$ip_i" == "255.255.255.255" ]]; then
@@ -28,11 +22,9 @@ configurar_dhcp() {
             break
         fi
     done
-
     until valid_ip "$ip_f" "$ip_i" "rango"; do 
         read -p "Rango Final (debe ser mayor a $ip_i): " ip_f
     done
-
     while true; do
         read -p "Tiempo de concesión (segundos): " lease_time
         if [[ $lease_time =~ ^[0-9]+$ ]] && [[ $lease_time -gt 0 ]]; then 
@@ -132,5 +124,4 @@ interfaz="enp0s8"
     done
 }
 
-# 5. Ejecución (Solo si el script se llama directamente)
 #menu_dhcp

@@ -1,5 +1,4 @@
 #!/bin/bash
-
 # ===========================================================================
 # Script: Validador de Red
 # Author: Alexander Vega / Ax2 - / Codigo principal tomado de: https://www.linuxjournal.com/content/validating-ip-address-bash-script + Validacion que IP Inicial sea menor a la IP Final
@@ -10,12 +9,9 @@
 #               integridad del rango comparando el cuarto octeto final vs inicial, obtiene la ip una vez validada, la deshace en un array separando los octetos y analizandolos/comparandolos individualmente a excepcion del ultimo octeto que compara con ip de incio para verificar la coherencia en el rango.
 # Parametros = $1 - IP a validar / $2 - IP de inicio (para comparar rangos) | Funciona con un parametro para verificar la base de la ip y dos para verificar rangos.
 
-
-
 configurar_Red(){
     local interfaz=$1
     local base_ip="" mask="" ip_i="" gateway="" dns_server="" respuesta=""
-    
     echo -e "\n[*] Iniciando Configuración de Interfaz: $interfaz"
    until valid_ip "$mask" "" "mask"; do 
         read -p "Máscara de Subred (ej. 255.255.255.0): " mask
@@ -26,11 +22,9 @@ configurar_Red(){
             break
         fi
     done
-
     IFS='.' read -r -a oct_i <<< "$ip_i"
     base_ip="${oct_i[0]}.${oct_i[1]}.${oct_i[2]}.0"
-
-    while true; do
+while true; do
         read -p "Puerta de enlace (Enter para omitir): " gateway
         [[ -z "$gateway" ]] && break
         valid_ip "$gateway" "$base_ip" "host" && break
@@ -69,8 +63,6 @@ configurar_Red(){
         echo -e "\e[33m[!] Configuración cancelada.\e[0m"
     fi
 }
-
-
 valid_ip(){
     local ip=$(echo "$1" | xargs)            
     local ip_referencia=$(echo "$2" | xargs) 
@@ -138,7 +130,6 @@ valid_ip(){
             fi 
             ;;
     esac
-
     if [[ -n $ip_referencia ]]; then
         IFS='.' read -r -a ref_array <<< "$ip_referencia"
         if [[ ${ip_array[0]} -ne ${ref_array[0]} ]] || \
@@ -147,7 +138,6 @@ valid_ip(){
             echo -e "\e[31m[!] Error: La IP $ip no pertenece a la red ${ref_array[0]}.${ref_array[1]}.${ref_array[2]}.0\e[0m"
             return 1
         fi
-
         if [[ $tipo == "rango" ]]; then
             if [[ ${ip_array[3]} -lt ${ref_array[3]} ]]; then
                 echo -e "\e[31m[!] Error: Rango ilógico. El final (.${ip_array[3]}) debe ser mayor o igual al inicio (.${ref_array[3]})\e[0m"
@@ -155,8 +145,6 @@ valid_ip(){
             fi
         fi
         fi
-    
-
     return 0
 }
 
