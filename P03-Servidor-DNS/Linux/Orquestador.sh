@@ -1,8 +1,5 @@
 #!/bin/bash
 
-# ===========================================================================
-# Script: Orquestador Maestro Modular (DNS / DHCP / RED)
-# ===========================================================================
 
 cargar_dependencias() {
     export interfaz="enp0s8"
@@ -28,9 +25,32 @@ check_red_lista() {
     return 0
 }
 
-# --- NUEVO MÓDULO DNS MODULAR ---
+# --- MÓDULO DNS ACTUALIZADO (Servidor + Dominios) ---
 Gestionar_DNS_Modular() {
     local servicio="bind9"
+    local conf_options="/etc/bind/named.conf.options"
+    
+    # --- BLOQUE DE CONFIGURACIÓN DEL SERVIDOR ---
+    # Esto permite que el servidor reciba consultas de otros equipos
+    echo "[*] Aplicando configuración global del servidor DNS..."
+    cat <<EOF > $conf_options
+options {
+    directory "/var/cache/bind";
+
+    # Escuchar en todas las interfaces (necesario para que el cliente lo vea)
+    listen-on port 53 { any; };
+    
+    # Permitir consultas desde cualquier IP
+    allow-query { any; };
+
+    # Permitir que resuelva nombres externos
+    recursion yes;
+
+    dnssec-validation auto;
+    listen-on-v6 { any; };
+};
+EOF
+
     mon_service "$servicio"
 
     while true; do
@@ -55,37 +75,38 @@ Gestionar_DNS_Modular() {
                     read -p "Nombre dominio: " dominio
                 done
 
-                # Aseguramos que la red esté lista para tener una IP base
                 check_red_lista || configurar_Red "$interfaz"
-                local IPSERVIDOR=$(ip -4 addr show "$interfaz" | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -n1)
+                local IP_SERVIDOR=$(ip -4 addr show "$interfaz" | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -n1)
 
-                read -p "IP DE DOMINIO (Presiona enter para establecer $IPSERVIDOR): " ip_usuario
-                local ip_final=${ip_usuario:-$IPSERVIDOR}
+                read -p "IP DE DESTINO DEL DOMINIO (Enter para apuntar al servidor $IP_SERVIDOR): " ip_usuario
+                local ip_final=${ip_usuario:-$IP_SERVIDOR}
 
-                echo "[*] Configurando zona: $dominio en $ip_final"
+                echo "[*] Configurando zona: $dominio -> $ip_final"
                 
+                # Registro en named.conf.local
                 echo "zone \"$dominio\" { type master; file \"/etc/bind/db.$dominio\"; };" >> /etc/bind/named.conf.local
 
+                # Creación del archivo de zona (db.dominio)
                 cat <<EOF > /etc/bind/db.$dominio
 \$TTL    604800
 @       IN      SOA     ns.$dominio. root.$dominio. ( 1; 604800; 86400; 2419200; 604800 )
 @       IN      NS      ns.$dominio.
 @       IN      A       $ip_final
-ns      IN      A       $ip_final
-www     IN      CNAME   $dominio.
+ns      IN      A       $IP_SERVIDOR
+www     IN      A       $ip_final
 EOF
                 systemctl restart "$servicio"
-                echo -e "\e[32m[OK] Dominio $dominio configurado exitosamente.\e[0m"
+                echo -e "\e[32m[OK] Servidor y dominio $dominio configurados.\e[0m"
                 ;;
             3)
-                read -p "Ingrese el nombre del dominio a borrar: " borrar
+                read -p "Ingrese dominio a borrar: " borrar
                 if grep -q "zone \"$borrar\"" /etc/bind/named.conf.local; then
                     sed -i "/zone \"$borrar\"/,/};/d" /etc/bind/named.conf.local
                     rm -f "/etc/bind/db.$borrar"
                     systemctl restart "$servicio"
-                    echo -e "\e[32m[OK] Dominio $borrar eliminado del sistema.\e[0m"
+                    echo -e "\e[32m[OK] Dominio eliminado.\e[0m"
                 else
-                    echo -e "\e[31m[!] El dominio no existe.\e[0m"
+                    echo -e "\e[31m[!] No existe.\e[0m"
                 fi
                 ;;
             4) break ;;
@@ -109,9 +130,9 @@ menu_principal(){
         
         case $opcion in
             1)
- check_red_lista 
-menu_dhcp
-;;
+                # Entramos directo al menú para evitar bloqueos
+                menu_dhcp
+                ;;
             2) Gestionar_DNS_Modular ;;
             3) configurar_Red "$interfaz" ;;
             4) 
