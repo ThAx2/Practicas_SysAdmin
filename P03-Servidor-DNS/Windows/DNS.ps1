@@ -1,16 +1,13 @@
-# Importar módulos hermanos (Asegúrate que estén en la misma carpeta)
 . "$PSScriptRoot\Validacion_IP.ps1"
 . "$PSScriptRoot\Mon_Service.ps1"
 . "$PSScriptRoot\DHCP.ps1"
 
-# Verificación de privilegios
 if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     Write-Host " [!] ERROR: Debes ejecutar como ADMINISTRADOR." -ForegroundColor Red
     Pause; exit
 }
 
 function Menu-DNS {
-    # Obtener IP actual del servidor para usarla como referencia
     $IP_SRV = (Get-NetIPAddress -InterfaceAlias "Ethernet" -AddressFamily IPv4).IPAddress | Select-Object -First 1
 
     do {
@@ -34,18 +31,14 @@ function Menu-DNS {
                 $dominio = Read-Host " Nombre del nuevo dominio (ej. pecas.com)"
                 if ([string]::IsNullOrWhiteSpace($dominio)) { continue }
 
-                # IP de Destino: Aquí puedes poner la .20, la .23 o la que sea
                 $ip_dest = Read-Host " IP de DESTINO para $dominio (Enter para $IP_SRV)"
                 $IP_FINAL = if ([string]::IsNullOrWhiteSpace($ip_dest)) { $IP_SRV } else { $ip_dest }
 
                 if (Test-IsValidIP -IP $IP_FINAL) {
                     Write-Host " [*] Creando Zona y Registros..." -ForegroundColor Magenta
                     Add-DnsServerPrimaryZone -Name $dominio -ZoneFile "$dominio.dns" -ErrorAction SilentlyContinue
-                    
-                    # Registro @ (A) y www (CNAME)
                     Add-DnsServerResourceRecordA -Name "@" -ZoneName $dominio -IPv4Address $IP_FINAL -Force
                     Add-DnsServerResourceRecordCName -Name "www" -ZoneName $dominio -HostNameAlias "$dominio." -Force
-                    
                     Write-Host " [OK] Dominio $dominio apunta a $IP_FINAL" -ForegroundColor Green
                 }
                 Pause
@@ -64,7 +57,6 @@ function Menu-DNS {
     } while ($optDns -ne "4")
 }
 
-# --- MENU PRINCIPAL DEL ORQUESTADOR ---
 do {
     Clear-Host
     Write-Host "================================================" -ForegroundColor Yellow
