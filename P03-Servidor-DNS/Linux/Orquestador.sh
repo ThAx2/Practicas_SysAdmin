@@ -96,8 +96,8 @@ EOF
                 rm -f "/etc/bind/db.$borrar"
                 systemctl restart "$servicio"
                 echo -e "\e[32m[OK] Baja exitosa del dominio directo.\e[0m"
-                ;;
-            4) return 0 ;;
+		        ;;
+		    4) return 0 ;;
         esac
     done
 }
