@@ -2,8 +2,6 @@
 if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     Write-Host "[!] Ejecuta como Administrador." -ForegroundColor Red; pause; exit
 }
-
-# --- 1. FUNCIÓN DE GESTIÓN DE SERVICIOS (VERIFICAR Y PREGUNTAR) ---
 function Gestionar-Instalacion {
     param($FeatureName, $ServiceName)
     
@@ -32,7 +30,7 @@ function Menu-DHCP {
     Gestionar-Instalacion -FeatureName "DHCP" -ServiceName "DhcpServer"
 
     Clear-Host
-    Write-Host "--- CONFIGURACION DHCP (CON LIMPIEZA Y FORCE) ---" -ForegroundColor Yellow
+    Write-Host "--- CONFIGURACION DHCP ---" -ForegroundColor Yellow
     $int  = Read-Host "Nombre Interfaz (ej: Ethernet 2)"
     $ip_s = Read-Host "IP Servidor (ej: 192.168.100.20)"
     $mask = Read-Host "Mascara (ej: 255.255.255.0)"
@@ -72,9 +70,9 @@ function Menu-DNS {
     do {
         Clear-Host
         Write-Host "--- GESTION DNS ---" -ForegroundColor Yellow
-        Write-Host "1) ALTA (Zona Directa + WWW + Inversa + PTR)"
-        Write-Host "2) BAJA (Borrar Zona)"
-        Write-Host "3) CONSULTA TOTAL (Ver todos los registros)"
+        Write-Host "1) ALTA "
+        Write-Host "2) BAJA "
+        Write-Host "3) CONSULTA TOTAL"
         Write-Host "4) Volver"
         $opDNS = Read-Host "Opcion"
 
@@ -84,15 +82,12 @@ function Menu-DNS {
                 $ip   = Read-Host "IP (Enter para usar la del servidor)"
                 if (-not $ip) { $ip = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object {$_.InterfaceAlias -like "*Ethernet*"}).IPAddress[0] }
 
-                # Crear Zona Directa
                 if (-not (Get-DnsServerZone -Name $zona -ErrorAction SilentlyContinue)) {
                     Add-DnsServerPrimaryZone -Name $zona -ZoneFile "$zona.dns" -ErrorAction SilentlyContinue
                 }
-                # Crear A y WWW (para que funcione ping www)
                 Add-DnsServerResourceRecordA -Name "@" -ZoneName $zona -IPv4Address $ip -ErrorAction SilentlyContinue
                 Add-DnsServerResourceRecordA -Name "www" -ZoneName $zona -IPv4Address $ip -ErrorAction SilentlyContinue
 
-                # Crear Inversa (para que funcione nslookup IP)
                 $oct = $ip.Split('.')
                 $invZone = "$($oct[2]).$($oct[1]).$($oct[0]).in-addr.arpa"
                 if (-not (Get-DnsServerZone -Name $invZone -ErrorAction SilentlyContinue)) {
@@ -111,29 +106,25 @@ function Menu-DNS {
             "3" { # CONSULTA TOTAL
                 $z = Read-Host "Zona a consultar"
                 Write-Host "`n--- TODOS LOS REGISTROS DE $z ---" -ForegroundColor Cyan
-                # Muestra todo sin filtro
                 Get-DnsServerResourceRecord -ZoneName $z | Format-Table -AutoSize
                 Pause
             }
         }
     } while ($opDNS -ne "4")
 }
-
-# --- 4. MENÚ PRINCIPAL CON MONITOR DE SERVICIOS ---
 do {
     Clear-Host
-    # MONITOR DE SERVICIOS EN TIEMPO REAL
     $sDHCP = Get-Service "dhcpserver" -ErrorAction SilentlyContinue
     $sDNS  = Get-Service "dns" -ErrorAction SilentlyContinue
     $stDHCP = if ($sDHCP) { $sDHCP.Status } else { "No Instalado" }
     $stDNS  = if ($sDNS) { $sDNS.Status } else { "No Instalado" }
 
     Write-Host "==========================================" -ForegroundColor Cyan
-    Write-Host "   GESTOR DE SERVIDOR (ORDENES ESTRICTAS)" -ForegroundColor Cyan
+    Write-Host "   GESTOR DE SERVIDOR" -ForegroundColor Cyan
     Write-Host "==========================================" -ForegroundColor Cyan
     Write-Host " [MONITOR] DHCP: $stDHCP | DNS: $stDNS" -ForegroundColor Magenta
     Write-Host "------------------------------------------"
-    Write-Host " 1) DHCP (Arreglar Red + Instalar + Configurar)"
+    Write-Host " 1) DHCP"
     Write-Host " 2) DNS (Altas/Bajas/Consultas Totales)"
     Write-Host " 3) Salir"
     
