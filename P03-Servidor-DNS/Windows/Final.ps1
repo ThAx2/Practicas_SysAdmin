@@ -3,58 +3,62 @@ if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdenti
     Write-Host "[!] ERROR: Ejecuta como Administrador." -ForegroundColor Red; pause; exit
 }
 
+# Variable Global para persistencia entre menús
 $Global:InterfazActiva = ""
 
-# Función para monitorizar sin errores de sintaxis
-function Monitor-Servicios {
-    $dhcp = Get-Service DHCPServer -ErrorAction SilentlyContinue
-    $dns = Get-Service DNS -ErrorAction SilentlyContinue
-    
-    $colorDHCP = "Red"; $statusDHCP = "STOPPED"
-    if ($dhcp.Status -eq "Running") { $statusDHCP = "RUNNING"; $colorDHCP = "Green" }
-    
-    $colorDNS = "Red"; $statusDNS = "STOPPED"
-    if ($dns.Status -eq "Running") { $statusDNS = "RUNNING"; $colorDNS = "Green" }
-    
-    Write-Host "`n----------------------------------------------" -ForegroundColor Gray
-    Write-Host " MONITOR -> DHCP: " -NoNewline
-    Write-Host $statusDHCP -ForegroundColor $colorDHCP -NoNewline
-    Write-Host " | DNS: " -NoNewline
-    Write-Host $statusDNS -ForegroundColor $colorDNS
-    Write-Host "----------------------------------------------" -ForegroundColor Gray
-}
-
-function Gestionar-Instalacion {
+function Comprobar-Instalacion {
     param($Feature)
-    $f = Get-WindowsFeature $Feature
-    if ($f.Installed) {
-        Write-Host "[v] El servicio $Feature ya está instalado." -ForegroundColor Green
-        $r = Read-Host "¿Desea REINSTALAR (borrado total)? (s/n)"
-        if ($r -eq "s") {
-            Write-Host "[*] Eliminando..." -ForegroundColor Yellow
+    $estado = Get-WindowsFeature $Feature
+    if ($estado.Installed) {
+        Write-Host "[v] El servicio $($Feature) ya está instalado." -ForegroundColor Green
+        $resp = Read-Host "¿Desea reinstalarlo? (s/n)"
+        if ($resp -eq "s") {
+            Write-Host "[*] Reinstalando..." -ForegroundColor Yellow
             Uninstall-WindowsFeature $Feature -IncludeManagementTools | Out-Null
             Install-WindowsFeature $Feature -IncludeManagementTools | Out-Null
         }
     } else {
-        Write-Host "[x] $Feature no detectado." -ForegroundColor Red
-        $r = Read-Host "¿Instalar ahora? (s/n)"
-        if ($r -eq "s") { Install-WindowsFeature $Feature -IncludeManagementTools | Out-Null }
+        Write-Host "[x] El servicio $($Feature) NO está instalado." -ForegroundColor Red
+        $resp = Read-Host "¿Desea instalarlo ahora? (s/n)"
+        if ($resp -eq "s") {
+            Install-WindowsFeature $Feature -IncludeManagementTools | Out-Null
+        }
     }
 }
 
+# FIX: Función corregida para evitar el error de sintaxis de la imagen 1c4e49
+function Monitor-Servicios {
+    $dhcp = Get-Service DHCPServer -ErrorAction SilentlyContinue
+    $dns = Get-Service DNS -ErrorAction SilentlyContinue
+    
+    # Determinamos estados y colores antes del Write-Host
+    $stDHCP = "STOPPED"; $colDHCP = "Red"
+    if ($dhcp.Status -eq "Running") { $stDHCP = "RUNNING"; $colDHCP = "Green" }
+
+    $stDNS = "STOPPED"; $colDNS = "Red"
+    if ($dns.Status -eq "Running") { $stDNS = "RUNNING"; $colDNS = "Green" }
+    
+    Write-Host "----------------------------------------------" -ForegroundColor Gray
+    Write-Host " MONITOR -> DHCP: " -NoNewline
+    Write-Host $stDHCP -ForegroundColor $colDHCP -NoNewline
+    Write-Host " | DNS: " -NoNewline
+    Write-Host $stDNS -ForegroundColor $colDNS
+    Write-Host "----------------------------------------------" -ForegroundColor Gray
+}
+
 function Menu-DHCP {
-    Gestionar-Instalacion -Feature "DHCP"
+    Comprobar-Instalacion -Feature "DHCP"
     Clear-Host
-    Write-Host "--- CONFIGURACION DHCP ---" -ForegroundColor Yellow
-    $Global:InterfazActiva = Read-Host "Nombre Interfaz (ej: Ethernet 2)"
+    Write-Host "=== CONFIGURACION DHCP (GATEWAY OPCIONAL) ===" -ForegroundColor Yellow
+    $Global:InterfazActiva = Read-Host "Interfaz (ej: Ethernet 2)"
     $ip_s = Read-Host "IP Servidor (ej: 10.10.10.3)"
     $mask = Read-Host "Mascara (ej: 255.255.255.0)"
-    $gw   = Read-Host "Gateway (Enter para vacio)"
+    $gw   = Read-Host "Gateway (Enter para dejar VACIO)"
     $ip_f = Read-Host "IP Final Rango"
-    $dns  = Read-Host "DNS (Enter para $ip_s)"
+    $dns  = Read-Host "DNS (Enter para usar $ip_s)"
     if (-not $dns) { $dns = $ip_s }
 
-    Write-Host "`n[*] Limpiando red y RPC..." -ForegroundColor Cyan
+    Write-Host "`n[*] Limpiando y fijando IP estática..." -ForegroundColor Cyan
     Stop-Service DHCPServer -Force -ErrorAction SilentlyContinue
     Set-NetIPInterface -InterfaceAlias $Global:InterfazActiva -DHCP Disabled -ErrorAction SilentlyContinue
     Get-NetIPAddress -InterfaceAlias $Global:InterfazActiva -AddressFamily IPv4 | Remove-NetIPAddress -Confirm:$false -ErrorAction SilentlyContinue
@@ -63,9 +67,10 @@ function Menu-DHCP {
     if ($gw) { $p.DefaultGateway = $gw }
     New-NetIPAddress @p -ErrorAction SilentlyContinue | Out-Null
 
+    Write-Host "[*] Iniciando DHCP (Esperando sincronización RPC)..." -ForegroundColor Yellow
     Start-Service DHCPServer
     while ((Get-Service DHCPServer).Status -ne "Running") { Start-Sleep -Seconds 1 }
-    Start-Sleep -Seconds 4 # FIX WIN32 1753
+    Start-Sleep -Seconds 4 # FIX: Evita errores WIN32 1753 de las capturas
 
     Get-DhcpServerv4Scope | Remove-DhcpServerv4Scope -Force -ErrorAction SilentlyContinue
     $base = $ip_s.SubString(0, $ip_s.LastIndexOf('.')) + ".0"
@@ -77,53 +82,57 @@ function Menu-DHCP {
     Set-DhcpServerv4Binding -InterfaceAlias $Global:InterfazActiva -BindingState $true
     
     Restart-Service DHCPServer -Force
-    Write-Host "[OK] DHCP listo." -ForegroundColor Green; Pause
+    Write-Host "[OK] DHCP Configurado." -ForegroundColor Green; Pause
 }
 
 function Menu-DNS {
-    Gestionar-Instalacion -Feature "DNS"
+    Comprobar-Instalacion -Feature "DNS"
     do {
         Clear-Host
         Monitor-Servicios
-        Write-Host "--- GESTION DNS ---" -ForegroundColor Yellow
-        Write-Host "1) ALTA | 2) BAJA (Completa) | 3) CONSULTA | 4) Volver"
+        Write-Host "=== GESTION DNS ===" -ForegroundColor Yellow
+        Write-Host "1) ALTA (Directa + Inversa)"
+        Write-Host "2) BAJA (Directa + Inversa)"
+        Write-Host "3) CONSULTA TOTAL"
+        Write-Host "4) Volver"
         $op = Read-Host "Opcion"
 
         switch ($op) {
             "1" {
                 $zona = Read-Host "Nombre Dominio"
-                if (-not $Global:InterfazActiva) { $Global:InterfazActiva = Read-Host "Interfaz" }
+                if (-not $Global:InterfazActiva) { $Global:InterfazActiva = Read-Host "Nombre Interfaz" }
                 
-                # FIX: Obtención segura de IP del servidor
-                $ip_serv = (Get-NetIPAddress -InterfaceAlias $Global:InterfazActiva -AddressFamily IPv4).IPAddress[0]
-                $ip = Read-Host "IP (Enter para $ip_serv)"
-                if (-not $ip) { $ip = $ip_serv }
+                # FIX: Obtener IP real para evitar error 'argument is null'
+                $ip_def = (Get-NetIPAddress -InterfaceAlias $Global:InterfazActiva -AddressFamily IPv4).IPAddress[0]
+                $ip = Read-Host "IP Destino (Enter para $ip_def)"
+                if (-not $ip) { $ip = $ip_def }
 
                 if (-not (Get-DnsServerZone -Name $zona -ErrorAction SilentlyContinue)) {
                     Add-DnsServerPrimaryZone -Name $zona -ZoneFile "$zona.dns" -ErrorAction SilentlyContinue
                 }
-                Add-DnsServerResourceRecordA -Name "@" -ZoneName $zona -IPv4Address $ip -Force -ErrorAction SilentlyContinue
-                Add-DnsServerResourceRecordA -Name "www" -ZoneName $zona -IPv4Address $ip -Force -ErrorAction SilentlyContinue
+                Add-DnsServerResourceRecordA -Name "@" -ZoneName $zona -IPv4Address $ip -ErrorAction SilentlyContinue -Force
+                Add-DnsServerResourceRecordA -Name "www" -ZoneName $zona -IPv4Address $ip -ErrorAction SilentlyContinue -Force
                 
                 $oct = $ip.Split('.'); $inv = "$($oct[2]).$($oct[1]).$($oct[0]).in-addr.arpa"
                 if (-not (Get-DnsServerZone -Name $inv -ErrorAction SilentlyContinue)) {
                     Add-DnsServerPrimaryZone -Name $inv -ZoneFile "$inv.dns" -ErrorAction SilentlyContinue
                 }
-                Add-DnsServerResourceRecordPtr -Name $oct[3] -ZoneName $inv -PtrDomainName "$zona." -Force -ErrorAction SilentlyContinue
-                Write-Host "[OK] DNS Creado." -ForegroundColor Green; Pause
+                Add-DnsServerResourceRecordPtr -Name $oct[3] -ZoneName $inv -PtrDomainName "$zona." -ErrorAction SilentlyContinue -Force
+                Write-Host "[OK] Alta completada." -ForegroundColor Green; Pause
             }
             "2" {
                 $zona = Read-Host "Dominio a borrar"
-                # Intentamos sacar la IP para borrar la inversa antes de destruir la zona
+                # Intentamos obtener la IP antes de borrar para limpiar la inversa automáticamente
                 $rec = Get-DnsServerResourceRecord -ZoneName $zona -Name "@" -RRType A -ErrorAction SilentlyContinue
-                if ($rec) {
-                    $ip_z = $rec.RecordData.IPv4Address.IPAddressToString
+                $ip_z = if ($rec) { $rec.RecordData.IPv4Address.IPAddressToString } else { $null }
+                
+                Remove-DnsServerZone -Name $zona -Force -ErrorAction SilentlyContinue
+                if ($ip_z) {
                     $oct = $ip_z.Split('.'); $inv = "$($oct[2]).$($oct[1]).$($oct[0]).in-addr.arpa"
                     Remove-DnsServerZone -Name $inv -Force -ErrorAction SilentlyContinue
-                    Write-Host "[!] Zona Inversa $inv eliminada." -ForegroundColor Yellow
+                    Write-Host "[!] Borrada zona directa e inversa ($inv)." -ForegroundColor Yellow
                 }
-                Remove-DnsServerZone -Name $zona -Force -ErrorAction SilentlyContinue
-                Write-Host "[!] Zona Directa $zona eliminada." -ForegroundColor Yellow; Pause
+                Pause
             }
             "3" {
                 Get-DnsServerZone | ForEach-Object { 
@@ -138,10 +147,13 @@ function Menu-DNS {
 
 do {
     Clear-Host
-    Write-Host "=== GESTOR DE RED WINDOWS SERVER ===" -ForegroundColor Cyan
+    Write-Host "==========================================" -ForegroundColor Cyan
+    Write-Host "      GESTOR DE RED WINDOWS SERVER" -ForegroundColor Cyan
     Monitor-Servicios
-    Write-Host "1) DHCP | 2) DNS | 3) Salir"
-    $m = Read-Host "Selecciona"
+    Write-Host " 1) DHCP (Configurar Red)"
+    Write-Host " 2) DNS (Zonas y Registros)"
+    Write-Host " 3) Salir"
+    $m = Read-Host " Selecciona"
     if ($m -eq "1") { Menu-DHCP }
     if ($m -eq "2") { Menu-DNS }
 } while ($m -ne "3")
