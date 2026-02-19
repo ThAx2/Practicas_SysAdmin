@@ -26,12 +26,12 @@ function Comprobar-Instalacion {
     }
 }
 
-# FIX: Función corregida para evitar el error de sintaxis de la imagen 1c4e49
+# FIX: Función corregida para evitar el error 'term if is not recognized'
 function Monitor-Servicios {
     $dhcp = Get-Service DHCPServer -ErrorAction SilentlyContinue
     $dns = Get-Service DNS -ErrorAction SilentlyContinue
     
-    # Determinamos estados y colores antes del Write-Host
+    # Definimos los estados primero para que el Write-Host no falle
     $stDHCP = "STOPPED"; $colDHCP = "Red"
     if ($dhcp.Status -eq "Running") { $stDHCP = "RUNNING"; $colDHCP = "Green" }
 
@@ -70,7 +70,7 @@ function Menu-DHCP {
     Write-Host "[*] Iniciando DHCP (Esperando sincronización RPC)..." -ForegroundColor Yellow
     Start-Service DHCPServer
     while ((Get-Service DHCPServer).Status -ne "Running") { Start-Sleep -Seconds 1 }
-    Start-Sleep -Seconds 4 # FIX: Evita errores WIN32 1753 de las capturas
+    Start-Sleep -Seconds 4 
 
     Get-DhcpServerv4Scope | Remove-DhcpServerv4Scope -Force -ErrorAction SilentlyContinue
     $base = $ip_s.SubString(0, $ip_s.LastIndexOf('.')) + ".0"
@@ -101,8 +101,6 @@ function Menu-DNS {
             "1" {
                 $zona = Read-Host "Nombre Dominio"
                 if (-not $Global:InterfazActiva) { $Global:InterfazActiva = Read-Host "Nombre Interfaz" }
-                
-                # FIX: Obtener IP real para evitar error 'argument is null'
                 $ip_def = (Get-NetIPAddress -InterfaceAlias $Global:InterfazActiva -AddressFamily IPv4).IPAddress[0]
                 $ip = Read-Host "IP Destino (Enter para $ip_def)"
                 if (-not $ip) { $ip = $ip_def }
@@ -110,19 +108,18 @@ function Menu-DNS {
                 if (-not (Get-DnsServerZone -Name $zona -ErrorAction SilentlyContinue)) {
                     Add-DnsServerPrimaryZone -Name $zona -ZoneFile "$zona.dns" -ErrorAction SilentlyContinue
                 }
-                Add-DnsServerResourceRecordA -Name "@" -ZoneName $zona -IPv4Address $ip -ErrorAction SilentlyContinue -Force
-                Add-DnsServerResourceRecordA -Name "www" -ZoneName $zona -IPv4Address $ip -ErrorAction SilentlyContinue -Force
+                Add-DnsServerResourceRecordA -Name "@" -ZoneName $zona -IPv4Address $ip -ErrorAction SilentlyContinue
+                Add-DnsServerResourceRecordA -Name "www" -ZoneName $zona -IPv4Address $ip -ErrorAction SilentlyContinue
                 
                 $oct = $ip.Split('.'); $inv = "$($oct[2]).$($oct[1]).$($oct[0]).in-addr.arpa"
                 if (-not (Get-DnsServerZone -Name $inv -ErrorAction SilentlyContinue)) {
                     Add-DnsServerPrimaryZone -Name $inv -ZoneFile "$inv.dns" -ErrorAction SilentlyContinue
                 }
-                Add-DnsServerResourceRecordPtr -Name $oct[3] -ZoneName $inv -PtrDomainName "$zona." -ErrorAction SilentlyContinue -Force
+                Add-DnsServerResourceRecordPtr -Name $oct[3] -ZoneName $inv -PtrDomainName "$zona." -ErrorAction SilentlyContinue
                 Write-Host "[OK] Alta completada." -ForegroundColor Green; Pause
             }
             "2" {
                 $zona = Read-Host "Dominio a borrar"
-                # Intentamos obtener la IP antes de borrar para limpiar la inversa automáticamente
                 $rec = Get-DnsServerResourceRecord -ZoneName $zona -Name "@" -RRType A -ErrorAction SilentlyContinue
                 $ip_z = if ($rec) { $rec.RecordData.IPv4Address.IPAddressToString } else { $null }
                 
