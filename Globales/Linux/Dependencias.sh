@@ -16,6 +16,9 @@ cargar_dependencias() {
 
     [ -f "$RAIZ/P02-Servidor-DHCP/Linux/DHCP.sh" ] && source "$RAIZ/P02-Servidor-DHCP/Linux/DHCP.sh"
     [ -f "$RAIZ/P03-Servidor-DNS/Linux/DNS.sh" ] && source "$RAIZ/P03-Servidor-DNS/Linux/DNS.sh"
-    
+    [ -f "$RAIZ/P04-SSH/Linux/SSH.sh" ] && source "$RAIZ/P04-SSH/Linux/SSH.sh"
+	[ -f "$RAIZ/P05-FTP/Linux/FTP_Service.sh" ] && source "$RAIZ/P05-FTP/Linux/FTP_Service.sh"
     return 0
+
 }
+
