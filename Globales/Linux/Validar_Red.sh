@@ -12,7 +12,6 @@
 
 #Function para configurar base una ip
 #Parametros: Interfaz, Mask, IP Incial / Base_ip (POr temas academcios, agarraremos como ip base la primera del rango inicial sumandole uno al rango orinigal, ip final, Gateway, DNS
-echo "si jla";
 configurar_Red(){
     local interfaz=$1
     local base_ip="" mask="" ip_i="" gateway="" dns_server="" respuesta=""

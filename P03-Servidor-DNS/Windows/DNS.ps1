@@ -1,40 +1,56 @@
-. "$PSScriptRoot\Validacion_IP.ps1"
-. "$PSScriptRoot\Mon_Service.ps1"
-. "$PSScriptRoot\DHCP.ps1"
-
-if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    Write-Host "EJECUTAR COMO ADMINISTRADOR" -ForegroundColor Red; exit
-}
-
 function Menu-DNS {
-    $IP_S = (Get-NetIPAddress -InterfaceAlias "Ethernet" -AddressFamily IPv4).IPAddress | Select-Object -First 1
-    Write-Host "1) Consultar`n2) Alta`n3) Baja`n4) Volver"
-    $op = Read-Host "Opcion"
-    switch ($op) {
-        "1" { Get-DnsServerZone | Where-Object IsReverseLookupZone -eq $false | Select ZoneName; Pause }
-        "2" {
-            $dom = Read-Host "Dominio"
-            $ip_d = Read-Host "IP Destino (Enter para $IP_S)"
-            $fin = if ([string]::IsNullOrWhiteSpace($ip_d)) { $IP_S } else { $ip_d }
-            Add-DnsServerPrimaryZone -Name $dom -ZoneFile "$dom.dns" -ErrorAction SilentlyContinue
-            Add-DnsServerResourceRecordA -Name "@" -ZoneName $dom -IPv4Address $fin -Force
-            Write-Host "Alta OK" -ForegroundColor Green; Pause
-        }
-        "3" {
-            $b = Read-Host "Dominio a borrar"
-            Remove-DnsServerZone -Name $b -Force -ErrorAction SilentlyContinue
-            Write-Host "Baja OK" -ForegroundColor Green; Pause
-        }
-    }
-}
+    Comprobar-Instalacion -Feature "DNS"
+    do {
+        Clear-Host
+        Monitor-Servicios
+        Write-Host "=== GESTION DNS ===" -ForegroundColor Yellow
+        Write-Host "1) ALTA (Directa + Inversa)"
+        Write-Host "2) BAJA (Directa + Inversa)"
+        Write-Host "3) CONSULTA TOTAL"
+        Write-Host "4) Volver"
+        $op = Read-Host "Opcion"
 
-while ($true) {
-    Clear-Host
-    Write-Host "=== ORQUESTADOR ==="
-    Write-Host "1) DHCP`n2) DNS`n3) Estatus`n4) Salir"
-    $m = Read-Host "Opcion"
-    if ($m -eq "1") { Configurar-DHCP -interface "Ethernet" }
-    elseif ($m -eq "2") { Check-Service -RoleName "DNS" -ServiceName "DNS"; Menu-DNS }
-    elseif ($m -eq "3") { Get-Service DHCPServer, DNS | Select Name, Status; Pause }
-    elseif ($m -eq "4") { break }
+        switch ($op) {
+            "1" {
+                $zona = Read-Host "Nombre Dominio"
+                if (-not $Global:InterfazActiva) { $Global:InterfazActiva = Read-Host "Nombre Interfaz" }
+                $ip_def = (Get-NetIPAddress -InterfaceAlias $Global:InterfazActiva -AddressFamily IPv4).IPAddress[0]
+                $ip = Read-Host "IP Destino (Enter para $ip_def)"
+                if (-not $ip) { $ip = $ip_def }
+
+                if (-not (Get-DnsServerZone -Name $zona -ErrorAction SilentlyContinue)) {
+                    Add-DnsServerPrimaryZone -Name $zona -ZoneFile "$zona.dns" -ErrorAction SilentlyContinue
+                }
+                Add-DnsServerResourceRecordA -Name "@" -ZoneName $zona -IPv4Address $ip -ErrorAction SilentlyContinue
+                Add-DnsServerResourceRecordA -Name "www" -ZoneName $zona -IPv4Address $ip -ErrorAction SilentlyContinue
+                
+                $oct = $ip.Split('.'); $inv = "$($oct[2]).$($oct[1]).$($oct[0]).in-addr.arpa"
+                if (-not (Get-DnsServerZone -Name $inv -ErrorAction SilentlyContinue)) {
+                    Add-DnsServerPrimaryZone -Name $inv -ZoneFile "$inv.dns" -ErrorAction SilentlyContinue
+                }
+                Add-DnsServerResourceRecordPtr -Name $oct[3] -ZoneName $inv -PtrDomainName "$zona." -ErrorAction SilentlyContinue
+                Write-Host "[OK] Alta completada." -ForegroundColor Green; Pause
+            }
+            "2" {
+                $zona = Read-Host "Dominio a borrar"
+                $rec = Get-DnsServerResourceRecord -ZoneName $zona -Name "@" -RRType A -ErrorAction SilentlyContinue
+                $ip_z = if ($rec) { $rec.RecordData.IPv4Address.IPAddressToString } else { $null }
+                
+                Remove-DnsServerZone -Name $zona -Force -ErrorAction SilentlyContinue
+                if ($ip_z) {
+                    $oct = $ip_z.Split('.'); $inv = "$($oct[2]).$($oct[1]).$($oct[0]).in-addr.arpa"
+                    Remove-DnsServerZone -Name $inv -Force -ErrorAction SilentlyContinue
+                    Write-Host "[!] Borrada zona directa e inversa ($inv)." -ForegroundColor Yellow
+                }
+                Pause
+            }
+            "3" {
+                Get-DnsServerZone | ForEach-Object { 
+                    Write-Host "`n>> $($_.ZoneName)" -ForegroundColor Magenta
+                    Get-DnsServerResourceRecord -ZoneName $_.ZoneName | ft HostName,RecordType,RecordData -AutoSize
+                }
+                Pause
+            }
+        }
+    } while ($op -ne "4")
 }

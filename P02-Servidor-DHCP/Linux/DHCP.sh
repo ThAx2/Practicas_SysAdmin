@@ -118,7 +118,7 @@ interfaz="enp0s8"
                     echo "No hay registro de concesiones todavía."
                 fi
                 ;;
-            4) return 0 ;; # Cambiamos exit por return para volver al script principal
+            4) return 0 ;;
             *) echo "Opción no válida." ;;
         esac
     done
