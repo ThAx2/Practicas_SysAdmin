@@ -17,21 +17,23 @@ function Comprobar-Instalacion {
         }
     }
 }
-
 function Monitor-Servicios {
     $dhcp = Get-Service DHCPServer -ErrorAction SilentlyContinue
     $dns = Get-Service DNS -ErrorAction SilentlyContinue
+    $ftp = Get-Service ftpsvc -ErrorAction SilentlyContinue 
     
-    $stDHCP = "STOPPED"; $colDHCP = "Red"
-    if ($dhcp.Status -eq "Running") { $stDHCP = "RUNNING"; $colDHCP = "Green" }
+    $stDHCP = if ($dhcp.Status -eq "Running") { "RUNNING" } else { "STOPPED" }
+    $colDHCP = if ($stDHCP -eq "RUNNING") { "Green" } else { "Red" }
 
-    $stDNS = "STOPPED"; $colDNS = "Red"
-    if ($dns.Status -eq "Running") { $stDNS = "RUNNING"; $colDNS = "Green" }
+    $stDNS = if ($dns.Status -eq "Running") { "RUNNING" } else { "STOPPED" }
+    $colDNS = if ($stDNS -eq "RUNNING") { "Green" } else { "Red" }
+
+    $stFTP = if ($ftp.Status -eq "Running") { "RUNNING" } else { "STOPPED" }
+    $colFTP = if ($stFTP -eq "RUNNING") { "Green" } else { "Red" }
     
-    Write-Host "----------------------------------------------" -ForegroundColor Gray
-    Write-Host " MONITOR -> DHCP: " -NoNewline
-    Write-Host $stDHCP -ForegroundColor $colDHCP -NoNewline
-    Write-Host " | DNS: " -NoNewline
-    Write-Host $stDNS -ForegroundColor $colDNS
-    Write-Host "----------------------------------------------" -ForegroundColor Gray
+    Write-Host "----------------------------------------------------------" -ForegroundColor Gray
+    Write-Host " MONITOR -> DHCP: " -NoNewline; Write-Host $stDHCP -ForegroundColor $colDHCP -NoNewline
+    Write-Host " | DNS: " -NoNewline; Write-Host $stDNS -ForegroundColor $colDNS -NoNewline
+    Write-Host " | FTP: " -NoNewline; Write-Host $stFTP -ForegroundColor $colFTP
+    Write-Host "----------------------------------------------------------" -ForegroundColor Gray
 }
