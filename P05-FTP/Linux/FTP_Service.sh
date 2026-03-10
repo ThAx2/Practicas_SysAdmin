@@ -146,17 +146,10 @@ CambiarGrupo(){
     echo "[OK] $Nombre_Usuario movido a $NuevoGrupo."
 }
 
-mon_service() {
-    echo "Monitoreando: $1"
-    if ! systemctl is-active --quiet $1; then
-        echo "Estado: $1 no detectado o detenido. Intentando iniciar..."
-        apt install $1 -y || echo "Error al instalar $1."
-    fi
-}
 
 menu_FTP(){
     servicio="vsftpd"
-    mon_service $servicio  
+    mon_servicer $servicio  
     
     Setup_Entorno
     Configurar_Servicio

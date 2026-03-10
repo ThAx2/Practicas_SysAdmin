@@ -8,7 +8,7 @@
 # ==============================================================================
 
 Configurar_DNS() {
-    mon_service "bind9"
+    mon_servicer "bind9"
     local servicio="bind9"
     local conf_local="/etc/bind/named.conf.local"
     local IP_SRV=$(ip -4 addr show "$interfaz" | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -n1)

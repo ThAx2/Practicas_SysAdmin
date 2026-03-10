@@ -218,3 +218,26 @@ check_red_lista() {
     fi
     return 0
 }
+
+validar_puerto(){
+    local p_temp
+    read -p "Ingrese el puerto para el servicio (Ej: 8080): " p_temp
+    
+    if [[ ! "$p_temp" =~ ^[0-9]+$ ]]; then
+        echo -e "\e[31m[!] Error: Debe ingresar un número de puerto válido.\e[0m"
+        return 1
+    fi
+
+    if [[ "$p_temp" -eq 22 || "$p_temp" -eq 23 || "$p_temp" -eq 53 || "$p_temp" -eq 21 || "$p_temp" -eq 3306 ]]; then
+        echo -e "\e[31m[!] BLOQUEADO: El puerto $p_temp es crítico (SSH/DNS/FTP/DB).\e[0m"
+        return 1
+    fi
+    if ss -tuln | grep -q ":$p_temp "; then
+        echo -e "\e[31m[!] Puerto $p_temp: EN USO por otro servicio.\e[0m"
+        return 1
+    else
+        echo -e "\e[32m[OK] Puerto $p_temp: LIBRE.\e[0m"
+        export PUERTO_ACTUAL=$p_temp
+        return 0
+    fi
+}

@@ -1,6 +1,6 @@
 SSH(){
     local servicio="openssh-server"
-    mon_service $servicio
+    mon_servicer $servicio
     systemctl enable ssh > /dev/null 2>&1
     systemctl start ssh > /dev/null 2>&1
 	echo -e " [*] SSH Arrancado y configurado para que incie en boot ";

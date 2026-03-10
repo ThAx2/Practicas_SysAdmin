@@ -3,7 +3,7 @@
 #source "./mon_service.sh"
 configurar_dhcp() {
     base_ip=""; mask=""; ip_i=""; ip_f=""; lease_time=""; gateway=""; dns_server=""; scope=""
-    mon_service $servicio
+    mon_servicer $servicio
     echo -e "\n--- Configuración de Ámbito DHCP ---"
     read -p "Nombre del Ámbito: " scope
     while [[ -z "$scope" ]]; do
