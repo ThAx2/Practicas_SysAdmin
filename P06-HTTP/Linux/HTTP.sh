@@ -1,31 +1,41 @@
-
 detener_competencia(){
     local actual=$1
-    echo "[*] Deteniendo otros servidores para evitar conflictos..."
-    for s in nginx apache2 tomcat10; do
-        [ "$s" != "$actual" ] && systemctl stop "$s" > /dev/null 2>&1
-    done
+    local p=${PUERTO_ACTUAL:-80}
+  
 }
+
 aplicar_puerto_http(){
     local servicio=$1
-    local p=${PUERTO_ACTUAL:-80}
+    local p=${PUERTO_ACTUAL:-"N/A"}
+    
+    if ! [[ "$p" =~ ^[0-9]+$ ]]; then
+        echo -e "\e[31m[!] Error: El puerto actual ($p) no es válido. Ve a la opción 7 primero.\e[0m"
+        return 1
+    fi
     
     echo -e "\e[34m[*] Configurando $servicio en puerto $p...\e[0m"
 
     case $servicio in
         "nginx")
+        
             sed -i -E "s/listen [0-9]+ default_server;/listen $p default_server;/g" /etc/nginx/sites-available/default
             sed -i -E "s/listen \[::\]:[0-9]+ default_server;/listen [::]:$p default_server;/g" /etc/nginx/sites-available/default
             
-            echo "<h1>Servidor NGINX Desplegado en Puerto $p</h1>" > /var/www/html/index.nginx-debian.html
-            rm -f /var/www/html/index.html 2>/dev/null
+            sed -i "s|root /var/www/html;|root /var/www/nginx;|g" /etc/nginx/sites-available/default
+            mkdir -p /var/www/nginx
+            
+            echo "<h1>Servidor NGINX Desplegado en Puerto $p</h1>" > /var/www/nginx/index.html
             ;;
 
         "apache2")
+          
             sed -i "s/Listen [0-9]*/Listen $p/g" /etc/apache2/ports.conf
             sed -i "s/:[0-9]*>/:$p>/g" /etc/apache2/sites-available/000-default.conf
             
-            echo "<h1>Servidor APACHE2 Desplegado en Puerto $p</h1>" > /var/www/html/index.html
+            sed -i "s|DocumentRoot /var/www/html|DocumentRoot /var/www/apache2|g" /etc/apache2/sites-available/000-default.conf
+            mkdir -p /var/www/apache2
+            
+            echo "<h1>Servidor APACHE2 Desplegado en Puerto $p</h1>" > /var/www/apache2/index.html
             ;;
 
         "tomcat10")
@@ -64,7 +74,7 @@ menu_http(){
         echo "4) Desplegar Nginx en puerto $mostrar_puerto"
         echo "5) Desplegar Apache en puerto $mostrar_puerto"
         echo "6) Desplegar Tomcat en puerto $mostrar_puerto"
-        	echo "7) Configurar/Cambiar Puerto de Red"
+        echo "7) Configurar/Cambiar Puerto de Red"
         echo "8) Volver al Orquestador"
         echo "------------------------------------------------"
         read -p "Seleccione una opción: " opcion
@@ -93,4 +103,3 @@ menu_http(){
         esac
     done
 }
-

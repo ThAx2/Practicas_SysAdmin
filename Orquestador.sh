@@ -5,7 +5,9 @@
 # ==============================================================================
 source "Globales/Linux/Dependencias.sh"
 export PUERTO_ACTUAL="N/A"
+	
 menu_principal(){
+	
     cargar_dependencias 
     while true; do
         echo -e "\n===================================="
@@ -18,22 +20,27 @@ menu_principal(){
         echo "4) Configurar Servidor DNS"
 		echo "5) Servidor FTP"
 		echo "6) Conectar a SSH"
-		echo "7) Configurar HTTP"
-        echo "8) Salir"
+		echo "7) Configurar WEB HTTP"
+		echo "8) Configurar Servidor WEB HTTP/FTP"
+
+        echo "9) Salir"
         read -p "Opción: " opcion 
  
         case $opcion in
 			1)
-             
+	echo -e "\n [*] Modulo de estatus:  "             
     echo -e "\n--- Estatus ---"
     echo "DHCP: $(systemctl is-active isc-dhcp-server)"
     echo "DNS:  $(systemctl is-active bind9)"
     echo "HTTP: $(systemctl is-active nginx 2>/dev/null || systemctl is-active apache2 2>/dev/null)"
     echo "Puerto HTTP asignado: $PUERTO_ACTUAL" 
+	echo "FTP: $(systemctl is-active vsftpd)"
+echo "SSH: $(systemctl is-active ssh)" 
     ip -4 addr show "$interfaz" | grep inet
 
                 ;;
             2) 
+
                 configurar_Red "$interfaz" 
                 ;;
             3) 
@@ -59,7 +66,9 @@ menu_principal(){
 				menu_http
 	;;
 
-			8) exit 0 ;;
+			8) menu_ftp_http ;;
+
+			9) exit 0 ;;
             *) echo "Opción no válida." ;;
         esac
     done

@@ -218,7 +218,6 @@ check_red_lista() {
     fi
     return 0
 }
-
 validar_puerto(){
     local p_temp
     read -p "Ingrese el puerto para el servicio (Ej: 8080): " p_temp
@@ -228,16 +227,37 @@ validar_puerto(){
         return 1
     fi
 
+    # Puertos prohibidos
     if [[ "$p_temp" -eq 22 || "$p_temp" -eq 23 || "$p_temp" -eq 53 || "$p_temp" -eq 21 || "$p_temp" -eq 3306 ]]; then
-        echo -e "\e[31m[!] BLOQUEADO: El puerto $p_temp es crítico (SSH/DNS/FTP/DB).\e[0m"
+        echo -e "\e[31m[!] BLOQUEADO: El puerto $p_temp es crítico.\e[0m"
         return 1
     fi
+
     if ss -tuln | grep -q ":$p_temp "; then
-        echo -e "\e[31m[!] Puerto $p_temp: EN USO por otro servicio.\e[0m"
-        return 1
-    else
-        echo -e "\e[32m[OK] Puerto $p_temp: LIBRE.\e[0m"
-        export PUERTO_ACTUAL=$p_temp
-        return 0
+        # Identificamos qué servicio está usando el puerto actualmente
+        local ocupante=$(ss -tlpn | grep ":$p_temp " | awk -F'"' '{print $2}')
+        
+        echo -e "\e[33m[*] El puerto $p_temp está ocupado por: ${ocupante:-"desconocido"}\e[0m"
+        echo -e "\e[33m[*] Liberando puerto $p_temp...\e[0m"
+
+        # Si el ocupante es uno de nuestros servidores, lo detenemos por sistema
+        if [[ "$ocupante" =~ (nginx|apache2|tomcat) ]]; then
+            systemctl stop "$ocupante" > /dev/null 2>&1
+        fi
+        
+        # Por si acaso queda algún proceso suelto (como los hijos de Apache que vimos)
+        fuser -k -9 -n tcp "$p_temp" > /dev/null 2>&1
+        sleep 1
+        
+        if ! ss -tuln | grep -q ":$p_temp "; then
+            echo -e "\e[32m[OK] Puerto $p_temp liberado. Los otros puertos siguen activos.\e[0m"
+            export PUERTO_ACTUAL=$p_temp
+            return 0
+        fi
     fi
+
+    # Si el puerto estaba libre o se liberó correctamente
+    export PUERTO_ACTUAL=$p_temp
+    echo -e "\e[32m[OK] Puerto configurado: $p_temp\e[0m"
+    return 0
 }

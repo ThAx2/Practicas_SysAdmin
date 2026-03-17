@@ -10,9 +10,10 @@ mon_servicer () {
     local servicio=$1
     echo -e "============================================"
     echo -e "Script monitoreo de servicios\n"
-    echo "Monitoreo: $servicio"
+   echo "Monitoreo: $servicio"
 
-    local lista_v=$(apt-cache madison "$servicio" | awk '{print $3}' | sort -ur | head -n 2)
+  
+    local lista_v=$(apt-cache policy "$servicio" | awk '/Tabla/,0' | awk '{print ($1=="***"?$2:$1)}' | grep -E '[0-9]\.' | sort -ur | head -n 2)
     local versiones=($lista_v)
 
     if [ ${#versiones[@]} -ge 1 ]; then
@@ -54,7 +55,6 @@ mon_servicer () {
             return 1
         fi
     fi
-
     if [ "$servicio" == "nginx" ]; then
         sed -i 's/# server_tokens off;/server_tokens off;/g' /etc/nginx/nginx.conf
     elif [ "$servicio" == "apache2" ]; then
