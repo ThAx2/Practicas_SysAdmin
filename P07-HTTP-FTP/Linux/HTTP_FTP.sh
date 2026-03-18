@@ -10,11 +10,13 @@ instalar_binario() {
     if [[ "$f" == *.deb ]]; then 
         sudo dpkg -i "$f"
     else 
-        # Para Tomcat (.tar.gz) desde FTP
         sudo rm -rf /opt/tomcat 2>/dev/null
         sudo mkdir -p /opt/tomcat
         sudo tar -xzf "$f" -C /opt/tomcat --strip-components=1
-        sudo chmod +x /opt/tomcat/bin/*.sh
+  
+        if [ -d "/opt/${s,,}/bin" ]; then
+            sudo chmod +x /opt/${s,,}/bin/*.sh
+        fi
         echo -e "\e[32m[OK] Extraído en /opt/tomcat\e[0m"
     fi
 }
@@ -22,7 +24,6 @@ instalar_binario() {
 detener_competencia_manual(){
     echo -e "\e[33m[*] Limpiando servicios para evitar conflictos de puerto...\e[0m"
     sudo systemctl stop nginx apache2 tomcat10 2>/dev/null
-    # Matar Tomcat manual si quedó algún proceso Java colgado
     sudo pkill -9 java 2>/dev/null
 }
 
@@ -31,7 +32,6 @@ verificar_final() {
     local p_http=${PUERTO_ACTUAL:-80}
     echo -e "\n[*] Verificando estado del servicio (Paciencia, Java es lento)..."
     
-    # Reintento de 3 veces (Total 15 segundos de espera)
     for i in {1..3}; do
         sleep 5
         if ss -tuln | grep -qE ":443|:$p_http"; then
@@ -58,7 +58,6 @@ configurar_seguridad_completa() {
     local serv=${1,,}
     local p_http=${PUERTO_ACTUAL:-80}
     
-    # Generar Certificado si no existe
     sudo mkdir -p "$DIR_SSL"
     if [ ! -f "$DIR_SSL/reprobados.crt" ]; then
         echo "[*] Generando Certificado SSL para $DOMINIO..."
@@ -71,52 +70,50 @@ configurar_seguridad_completa() {
     case $serv in
         "nginx")
             detener_competencia_manual
-            cat <<EOF | sudo tee /etc/nginx/sites-available/default
+cat <<EOF | sudo tee /etc/nginx/sites-available/default > /dev/null
 server {
-    listen $p_http;
-    server_name $DOMINIO;
-    return 301 https://\$host\$request_uri;
-}
-server {
-    listen 443 ssl;
-    server_name $DOMINIO;
-    ssl_certificate $DIR_SSL/reprobados.crt;
-    ssl_certificate_key $DIR_SSL/reprobados.key;
-    location / { root /var/www/nginx; index index.html; }
+    listen $p_http ssl; # Uso de p_http directo
+    server_name www.reprobados.com;
+
+    ssl_certificate /etc/ssl/reprobados/reprobados.crt;
+    ssl_certificate_key /etc/ssl/reprobados/reprobados.key;
+
+    location / {
+        root /var/www/nginx;
+        index index.html;
+    }
 }
 EOF
             sudo mkdir -p /var/www/nginx
-            echo "<h1>Nginx Seguro - Puerto $p_http</h1>" | sudo tee /var/www/nginx/index.html
+            echo "<h1>Nginx Seguro - Puerto $p_http</h1>" | sudo tee /var/www/nginx/index.html > /dev/null
             sudo systemctl restart nginx
             ;;
 
         "apache"|"apache2")
             detener_competencia_manual
             sudo a2enmod ssl rewrite headers >/dev/null 2>&1
-            echo -e "Listen $p_http\nListen 443" | sudo tee /etc/apache2/ports.conf
-            cat <<EOF | sudo tee /etc/apache2/sites-available/reprobados-ssl.conf
+            echo "Listen $p_http" | sudo tee /etc/apache2/ports.conf > /dev/null
+cat <<EOF | sudo tee /etc/apache2/sites-available/000-default.conf > /dev/null
 <VirtualHost *:$p_http>
-    ServerName $DOMINIO
-    Redirect permanent / https://$DOMINIO/
-</VirtualHost>
-<VirtualHost *:443>
-    ServerName $DOMINIO
+    ServerName www.reprobados.com
     DocumentRoot /var/www/apache2
+    
     SSLEngine on
-    SSLCertificateFile $DIR_SSL/reprobados.crt
-    SSLCertificateKeyFile $DIR_SSL/reprobados.key
+    SSLCertificateFile /etc/ssl/reprobados/reprobados.crt
+    SSLCertificateKeyFile /etc/ssl/reprobados/reprobados.key
+    
+    ErrorDocument 400 "Por favor, use HTTPS para conectar a este puerto."
 </VirtualHost>
 EOF
             sudo mkdir -p /var/www/apache2
-            echo "<h1>Apache Seguro - Puerto $p_http</h1>" | sudo tee /var/www/apache2/index.html
-            sudo a2ensite reprobados-ssl.conf >/dev/null 2>&1
+            echo "<h1>Apache Seguro - Puerto $p_http</h1>" | sudo tee /var/www/apache2/index.html > /dev/null
+            sudo a2ensite 000-default.conf >/dev/null 2>&1
             sudo systemctl restart apache2
             ;;
 
-        "tomcat"|"tomcat10")
+       "tomcat"|"tomcat10")
             detener_competencia_manual
             
-            # Detectar rutas según origen (APT vs FTP)
             local T_CONF=""
             local T_WWW=""
             if [ -d "/opt/tomcat" ]; then
@@ -130,28 +127,21 @@ EOF
             fi
 
             if [ -f "$T_CONF" ]; then
-                echo "[*] Modificando $T_CONF para puerto $p_http y SSL..."
-                sudo sed -i "s/port=\"8080\"/port=\"$p_http\"/g" "$T_CONF"
-                
-                # Inyectar Connector SSL si no existe
-                if ! grep -q "port=\"443\"" "$T_CONF"; then
-                    sudo sed -i '/<\/Service>/i \
-    <Connector port="443" protocol="org.apache.coyote.http11.Http11NioProtocol" \
-               maxThreads="150" SSLEnabled="true"> \
+                echo "[*] Configurando HTTPS DIRECTO en $T_CONF (Puerto: $p_http)..."
+                sudo sed -i '/<Connector port="/,/ \/>/d' "$T_CONF"
+                sudo sed -i '/<Service name="Catalina">/a \
+    <Connector port="'$p_http'" protocol="org.apache.coyote.http11.Http11NioProtocol" \
+               maxThreads="150" SSLEnabled="true" scheme="https" secure="true"> \
         <SSLHostConfig> \
             <Certificate certificateFile="'$DIR_SSL'/reprobados.crt" \
                          certificateKeyFile="'$DIR_SSL'/reprobados.key" \
                          type="RSA" /> \
         </SSLHostConfig> \
     </Connector>' "$T_CONF"
-                fi
+                
+                sudo mkdir -p "$T_WWW"
+                echo "<h1>Tomcat Seguro - Puerto $p_http</h1>" | sudo tee "$T_WWW/index.html" > /dev/null
 
-                # --- DESPLIEGUE DE INDEX PERSONALIZADO ---
-                # Eliminamos la página por defecto (index.jsp) para que use nuestro .html
-                sudo rm -f "$T_WWW/index.jsp"
-                echo "<h1>Servidor TOMCAT Desplegado en Puerto $p_http</h1>" | sudo tee "$T_WWW/index.html"
-
-                # Arranque
                 if [[ "$T_CONF" == *"/opt/"* ]]; then
                     echo "[*] Iniciando Tomcat Manual (startup.sh)..."
                     sudo /opt/tomcat/bin/startup.sh
@@ -164,7 +154,7 @@ EOF
 
         "vsftpd")
             sudo sed -i "s/ssl_enable=NO/ssl_enable=YES/" /etc/vsftpd.conf
-            echo -e "rsa_cert_file=$DIR_SSL/reprobados.crt\nrsa_private_key_file=$DIR_SSL/reprobados.key\nforce_local_data_ssl=YES\nforce_local_logins_ssl=YES" | sudo tee -a /etc/vsftpd.conf
+            echo -e "rsa_cert_file=$DIR_SSL/reprobados.crt\nrsa_private_key_file=$DIR_SSL/reprobados.key\nforce_local_data_ssl=YES\nforce_local_logins_ssl=YES" | sudo tee -a /etc/vsftpd.conf > /dev/null
             sudo systemctl restart vsftpd
             ;;
     esac
@@ -188,7 +178,6 @@ motor_instalacion_hibrida() {
     if [ "$origen" -eq 1 ]; then
         sudo apt update && sudo apt install -y $paquete_apt
     else
-        # Lógica FTP Centralizada
         mapfile -t versiones < <(curl -s -u "$FTP_USER:$FTP_PASS" "$FTP_BASE/$servicio/" | awk '{print $NF}' | grep -v ".sha256")
         [ ${#versiones[@]} -eq 0 ] && { echo "Error al conectar al FTP"; return 1; }
         
@@ -215,7 +204,6 @@ motor_instalacion_hibrida() {
 # ================================================================
 
 menu_ftp_http(){
-    # Variables de entorno localizadas
     FTP_IP=$(ip addr show $interfaz | grep "inet " | awk '{print $2}' | cut -d/ -f1 | head -n 1)
     FTP_USER="anonymous"; FTP_PASS=""; FTP_BASE="ftp://$FTP_IP/documentos_publicos/http/Linux"
     DIR_SSL="/etc/ssl/reprobados"; DOMINIO="www.reprobados.com"
@@ -242,7 +230,7 @@ menu_ftp_http(){
             2) motor_instalacion_hibrida "Apache" ;;
             3) motor_instalacion_hibrida "Tomcat" ;;
             4) configurar_seguridad_completa "vsftpd" ;;
-            5) validar_puerto ;; # Llama a tu función externa
+            5) validar_puerto ;; 
             6) ss -tuln | grep -E "(:443|:21|:$p_actual)" ; read -p "Enter..." ;;
             7) return 0 ;;
             *) echo "Inválido" ;;

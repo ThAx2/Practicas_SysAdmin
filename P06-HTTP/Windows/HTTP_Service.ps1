@@ -1,241 +1,212 @@
+# ==============================================================================
+# MODULO HTTP - WINDOWS (P06)
+# ==============================================================================
+
 function Detener-Competencia {
     param($actual)
-    Write-Host "[*] Deteniendo otros servidores para evitar conflictos..." -ForegroundColor Cyan
-    $servicios = @{
-        "nginx"  = "nginx"
-        "apache" = "Apache"
-        "tomcat" = "Tomcat9"
-    }
-    foreach ($key in $servicios.Keys) {
-        if ($key -ne $actual) {
-            $svc = Get-Service -Name $servicios[$key] -ErrorAction SilentlyContinue
-            if ($svc -and $svc.Status -eq "Running") {
-                Stop-Service $svc.Name -Force -ErrorAction SilentlyContinue
-                Write-Host "  [->] Detenido: $($svc.Name)" -ForegroundColor Yellow
-            }
-        }
-    }
+    # Matar TODOS los servidores web para liberar el puerto
+    Get-Process nginx -ErrorAction SilentlyContinue | Stop-Process -Force
+    Get-Process httpd -ErrorAction SilentlyContinue | Stop-Process -Force
+    Stop-Service nginx    -Force -ErrorAction SilentlyContinue
+    Stop-Service Apache   -Force -ErrorAction SilentlyContinue
+    Stop-Service Apache2.4 -Force -ErrorAction SilentlyContinue
+    Stop-Service W3SVC    -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 3
 }
 
-function Crear-IndexHTML {
-    param($servicio, $puerto)
-
-    switch -Regex ($servicio) {
-        "nginx" {
-            $htmlPath = "C:\tools\nginx\html\index.html"
-            if (Test-Path (Split-Path $htmlPath)) {
-                $html = @"
-<!DOCTYPE html>
-<html><head><meta charset='UTF-8'><title>NGINX - Puerto $puerto</title>
-<style>body{font-family:Arial;background:#1a1a2e;color:#eee;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;}
-.box{text-align:center;padding:40px;background:#16213e;border-radius:12px;border:2px solid #0f9b58;}
-h1{color:#0f9b58;}p{color:#aaa;}</style></head>
-<body><div class='box'><h1>&#9989; NGINX Activo</h1><p>Servidor desplegado en puerto <strong>$puerto</strong></p></div></body></html>
-"@
-                [System.IO.File]::WriteAllText($htmlPath, $html, [System.Text.UTF8Encoding]::new($false))
-                Write-Host "  [OK] index.html creado en $htmlPath" -ForegroundColor Green
-            }
-        }
-        "apache|httpd" {
-            # Buscar htdocs de Apache en rutas conocidas
-            $posibles = @(
-                "C:\tools\Apache24\htdocs",
-                "C:\Apache24\htdocs",
-                "$env:APPDATA\Apache24\htdocs",
-                "$env:APPDATA\Apache2.4\htdocs"
-            )
-            $htdocs = $posibles | Where-Object { Test-Path $_ } | Select-Object -First 1
-            if (-not $htdocs) {
-                # Búsqueda más amplia
-                $htdocs = (Get-ChildItem "$env:APPDATA\Apache*", "C:\tools\Apache*" -ErrorAction SilentlyContinue |
-                           ForEach-Object { "$($_.FullName)\htdocs" } |
-                           Where-Object { Test-Path $_ } |
-                           Select-Object -First 1)
-            }
-            if ($htdocs) {
-                $html = @"
-<!DOCTYPE html>
-<html><head><meta charset='UTF-8'><title>APACHE - Puerto $puerto</title>
-<style>body{font-family:Arial;background:#1a1a2e;color:#eee;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;}
-.box{text-align:center;padding:40px;background:#16213e;border-radius:12px;border:2px solid #d4380d;}
-h1{color:#d4380d;}p{color:#aaa;}</style></head>
-<body><div class='box'><h1>&#9989; APACHE Activo</h1><p>Servidor desplegado en puerto <strong>$puerto</strong></p></div></body></html>
-"@
-                [System.IO.File]::WriteAllText("$htdocs\index.html", $html, [System.Text.UTF8Encoding]::new($false))
-                Write-Host "  [OK] index.html creado en $htdocs" -ForegroundColor Green
-            } else {
-                Write-Host "  [!] No se encontró htdocs de Apache." -ForegroundColor Yellow
-            }
-        }
-        "tomcat" {
-            # CATALINA_BASE primero, luego CATALINA_HOME
-            $webapps = @(
-                "C:\ProgramData\Tomcat9\webapps\ROOT",
-                "C:\ProgramData\chocolatey\lib\Tomcat\tools\apache-tomcat-9.0.115\webapps\ROOT"
-            ) | Where-Object { Test-Path $_ } | Select-Object -First 1
-
-            if (-not $webapps) {
-                $webapps = "C:\ProgramData\Tomcat9\webapps\ROOT"
-                New-Item -ItemType Directory -Path $webapps -Force | Out-Null
-            }
-            $html = @"
-<!DOCTYPE html>
-<html><head><meta charset='UTF-8'><title>TOMCAT - Puerto $puerto</title>
-<style>body{font-family:Arial;background:#1a1a2e;color:#eee;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;}
-.box{text-align:center;padding:40px;background:#16213e;border-radius:12px;border:2px solid #f5a623;}
-h1{color:#f5a623;}p{color:#aaa;}</style></head>
-<body><div class='box'><h1>&#9989; TOMCAT Activo</h1><p>Servidor desplegado en puerto <strong>$puerto</strong></p></div></body></html>
-"@
-            [System.IO.File]::WriteAllText("$webapps\index.html", $html, [System.Text.UTF8Encoding]::new($false))
-            Write-Host "  [OK] index.html creado en $webapps" -ForegroundColor Green
-        }
-    }
-}
-
-function aplicar_puerto_http {
+function Aplicar-Puerto-HTTP {
     param($servicio)
 
-    $p = if ($global:PUERTO_ACTUAL) { [int]$global:PUERTO_ACTUAL } else { 80 }
-
-    # Detener competencia antes de configurar
-    Detener-Competencia $servicio
-
-    # Deshabilitar firewall y abrir puerto
-    Write-Host "[*] Configurando firewall..." -ForegroundColor Cyan
-    Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled False -ErrorAction SilentlyContinue
-    $ruleName = "HTTP-Puerto-$p"
-    Remove-NetFirewallRule -DisplayName $ruleName -ErrorAction SilentlyContinue
-    New-NetFirewallRule -DisplayName $ruleName -Direction Inbound -Protocol TCP -LocalPort $p -Action Allow -ErrorAction SilentlyContinue | Out-Null
-    Write-Host "  [OK] Firewall desactivado y puerto $p abierto" -ForegroundColor Green
-
-    # Verificar puerto ocupado
-    Write-Host "[*] Verificando puerto $p..." -ForegroundColor Cyan
-    $conexiones = Get-NetTCPConnection -LocalPort $p -State Listen -ErrorAction SilentlyContinue
-    if ($conexiones) {
-        $pids = $conexiones | Select-Object -ExpandProperty OwningProcess -Unique
-        Write-Host "[!] Puerto $p ocupado por PID(s): $($pids -join ', '). Limpiando..." -ForegroundColor Yellow
-        foreach ($pid in $pids) {
-            Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue
-        }
-        Start-Sleep -Seconds 2
-    }
-
-    # Buscar servicio instalado
-    $nombreServicio = switch ($servicio) {
-        "nginx"  { "nginx" }
-        "apache" { "Apache" }
-        "tomcat" { "Tomcat9" }
-    }
-    $s = Get-Service -Name $nombreServicio -ErrorAction SilentlyContinue
-    if (-not $s) {
-        Write-Host "[!] Servicio '$nombreServicio' no encontrado. ¿Está instalado?" -ForegroundColor Red
+    $p = $global:PUERTO_ACTUAL
+    if (-not ($p -match '^\d+$')) {
+        Write-Host "[!] Puerto invalido. Configura el puerto primero (opcion 7)." -ForegroundColor Red
         Pause; return
     }
-
-    Write-Host "[*] Configurando $($s.Name) en puerto $p..." -ForegroundColor Cyan
+    $p = [int]$p
+    Write-Host "[*] Configurando $servicio en puerto $p..." -ForegroundColor Blue
 
     switch ($servicio) {
+
         "nginx" {
-            $confPath = "C:\tools\nginx\conf\nginx.conf"
-            if (!(Test-Path $confPath)) {
-                Write-Host "[!] No se encontró $confPath" -ForegroundColor Red; Pause; return
+            $nginxDir = "C:\tools\nginx"
+            if (!(Test-Path "$nginxDir\nginx.exe")) {
+                Write-Host "[!] nginx no encontrado en $nginxDir" -ForegroundColor Red; Pause; return
             }
-            # Reemplazar solo el listen principal (igual que el sed del bash)
-            $conf = Get-Content $confPath
-            $dentroServer = $false; $yaReemplazado = $false
-            $conf = $conf | ForEach-Object {
-                if ($_ -match "^\s*server\s*\{") { $dentroServer = $true }
-                if ($dentroServer -and !$yaReemplazado -and $_ -match "^\s*listen\s+\d+") {
-                    $yaReemplazado = $true
-                    $_ -replace "listen\s+\d+", "listen       $p"
-                } else { $_ }
-            }
-            # FIX BOM: nginx no soporta UTF-8 con BOM, usar WriteAllLines
-            [System.IO.File]::WriteAllLines($confPath, $conf, [System.Text.UTF8Encoding]::new($false))
+
+            Get-Process nginx -ErrorAction SilentlyContinue | Stop-Process -Force
+            Start-Sleep -Seconds 2
+
+            $conf    = "$nginxDir\conf\nginx.conf"
+            $webRoot = "$nginxDir\html"
+            if (!(Test-Path $webRoot)) { New-Item $webRoot -ItemType Directory -Force | Out-Null }
+
+            $nginxConf = @"
+worker_processes  1;
+events { worker_connections 1024; }
+http {
+    include       mime.types;
+    default_type  application/octet-stream;
+    server {
+        listen $p;
+        server_name localhost;
+        location / { root html; index index.html; }
+    }
+}
+"@
+            Set-Content $conf $nginxConf -Encoding ASCII
+            Set-Content "$webRoot\index.html" "<html><body style='background:#1a1a2e;color:#0f9b58;font-family:Arial;text-align:center;padding:100px'><h1>NGINX - Puerto $p</h1></body></html>" -Encoding ASCII
+
+            Write-Host "[*] Iniciando nginx en puerto $p..." -ForegroundColor Cyan
+            Start-Process "$nginxDir\nginx.exe" -WorkingDirectory $nginxDir -WindowStyle Hidden
+            Start-Sleep -Seconds 4
         }
-        "apache" {
-            # Buscar httpd.conf igual que el sed del bash sobre ports.conf
-            $posiblesConf = @(
-                "C:\tools\Apache24\conf\httpd.conf",
-                "C:\Apache24\conf\httpd.conf",
-                "$env:APPDATA\Apache24\conf\httpd.conf",
-                "$env:APPDATA\Apache2.4\conf\httpd.conf"
-            )
-            $confPath = $posiblesConf | Where-Object { Test-Path $_ } | Select-Object -First 1
-            if (-not $confPath) {
-                $confPath = (Get-ChildItem "$env:APPDATA\Apache*", "C:\tools\Apache*" -ErrorAction SilentlyContinue |
-                             ForEach-Object { "$($_.FullName)\conf\httpd.conf" } |
-                             Where-Object { Test-Path $_ } | Select-Object -First 1)
+
+        "apache2" {
+            # Detectar ruta REAL del servicio Apache instalado
+            $rutaApache = $null
+
+            # Primero buscar en el servicio de Windows (fuente de verdad)
+            $svcApache = Get-Service -Name "Apache*" -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($svcApache) {
+                $svcPath = (Get-WmiObject Win32_Service | Where-Object { $_.Name -like "Apache*" } | Select-Object -First 1).PathName
+                if ($svcPath -match '"?([A-Za-z]:\[^"]+\bin\httpd\.exe)') {
+                    $rutaApache = Split-Path (Split-Path $matches[1] -Parent) -Parent
+                }
             }
-            if (-not $confPath) {
-                Write-Host "[!] No se encontró httpd.conf de Apache." -ForegroundColor Red; Pause; return
+
+            # Si no se obtuvo del servicio, buscar en rutas conocidas
+            if (!$rutaApache) {
+                foreach ($c in @("C:\Apache24","$env:APPDATA\Apache24","C:\tools\Apache24")) {
+                    if (Test-Path "$c\bin\httpd.exe") { $rutaApache = $c; break }
+                }
             }
-            $contenido = (Get-Content $confPath) -replace 'Listen \d+', "Listen $p"
-            [System.IO.File]::WriteAllLines($confPath, $contenido, [System.Text.UTF8Encoding]::new($false))
-            Write-Host "  [->] httpd.conf actualizado: Listen $p" -ForegroundColor Cyan
+
+            if (!$rutaApache) { Write-Host "[!] Apache no encontrado." -ForegroundColor Red; Pause; return }
+            Write-Host "[*] Apache real en: $rutaApache" -ForegroundColor Cyan
+
+            # Detener completamente
+            Get-Process httpd -ErrorAction SilentlyContinue | Stop-Process -Force
+            & "$rutaApache\bin\httpd.exe" -k stop 2>$null
+            if ($svcApache) { Stop-Service $svcApache.Name -Force -ErrorAction SilentlyContinue }
+            Start-Sleep -Seconds 2
+
+            # Editar httpd.conf de la ruta REAL
+            $conf = "$rutaApache\conf\httpd.conf"
+            $lineas = Get-Content $conf
+            $lineas = $lineas | ForEach-Object {
+                if ($_ -match '^Listen \d+')        { "Listen $p" }
+                elseif ($_ -match '^#?ServerName ') { "ServerName localhost:$p" }
+                else { $_ }
+            }
+            Set-Content $conf $lineas -Encoding ASCII
+
+            # Index en htdocs de la ruta real
+            Set-Content "$rutaApache\htdocs\index.html" "<html><body style='background:#1a1a2e;color:#d4380d;font-family:Arial;text-align:center;padding:100px'><h1>APACHE - Puerto $p</h1></body></html>" -Encoding ASCII
+
+            # Iniciar
+            if ($svcApache) {
+                Write-Host "[*] Iniciando $($svcApache.Name)..." -ForegroundColor Cyan
+                Start-Service $svcApache.Name -ErrorAction SilentlyContinue
+            } else {
+                Write-Host "[*] Iniciando Apache directamente..." -ForegroundColor Cyan
+                Start-Process "$rutaApache\bin\httpd.exe" -WindowStyle Hidden
+            }
+            Start-Sleep -Seconds 4
         }
-        "tomcat" {
-            # Buscar server.xml en CATALINA_BASE primero (igual lógica que bash con /etc/tomcat10/server.xml)
-            $posiblesXml = @(
-                "C:\ProgramData\Tomcat9\conf\server.xml",
-                "C:\ProgramData\chocolatey\lib\Tomcat\tools\apache-tomcat-9.0.115\conf\server.xml"
-            )
-            $confPath = $posiblesXml | Where-Object { Test-Path $_ } | Select-Object -First 1
-            if (-not $confPath) {
-                Write-Host "[!] No se encontró server.xml de Tomcat." -ForegroundColor Red; Pause; return
+
+        "tomcat10" {
+            Import-Module WebAdministration -ErrorAction SilentlyContinue
+            $webRoot = "C:\inetpub\wwwroot"
+            if (!(Test-Path $webRoot)) { New-Item $webRoot -ItemType Directory -Force | Out-Null }
+            Set-Content "$webRoot\index.html" "<html><body style='background:#1a1a2e;color:#0078d7;font-family:Arial;text-align:center;padding:100px'><h1>IIS - Puerto $p</h1></body></html>" -Encoding ASCII
+
+            # Detener W3SVC antes de cambiar bindings
+            Stop-Service W3SVC -Force -ErrorAction SilentlyContinue
+            Start-Sleep -Seconds 2
+
+            # Recrear Default Web Site con el puerto correcto
+            try {
+                Remove-Website -Name "Default Web Site" -ErrorAction SilentlyContinue
+                New-Website -Name "Default Web Site" -Port $p -PhysicalPath $webRoot -Force | Out-Null
+            } catch {
+                # Si falla, usar appcmd directamente
+                $appcmd = "$env:windir\system32\inetsrv\appcmd.exe"
+                & $appcmd set site "Default Web Site" /bindings:"http/*:$p`:" 2>$null
             }
-            # Mismo reemplazo que el bash: Connector port="xxxx"
-            $xmlContenido = (Get-Content $confPath) -replace 'Connector port="[0-9]*"', "Connector port=`"$p`""
-            [System.IO.File]::WriteAllLines($confPath, $xmlContenido, [System.Text.UTF8Encoding]::new($false))
-            Write-Host "  [->] server.xml actualizado: port=$p" -ForegroundColor Cyan
+
+            Start-Service W3SVC -ErrorAction SilentlyContinue
+            Start-Sleep -Seconds 3
         }
     }
 
-    # Crear index.html personalizado (lógica equivalente al bash)
-    Crear-IndexHTML $servicio $p
-
-    # Reiniciar y verificar (igual que systemctl restart + is-active del bash)
-    Write-Host "[*] Reiniciando $($s.Name)..." -ForegroundColor Cyan
-    Restart-Service $s.Name -Force -ErrorAction SilentlyContinue
-    Start-Sleep -Seconds 3
-
-    $svc = Get-Service -Name $s.Name -ErrorAction SilentlyContinue
-    if ($svc -and $svc.Status -eq "Running") {
-        Write-Host "[OK] $($s.Name) ONLINE en http://localhost:$p" -ForegroundColor Green
-        try { Start-Process "http://localhost:$p" -ErrorAction Stop }
-        catch { Write-Host "[!] Abra manualmente http://localhost:$p" -ForegroundColor Yellow }
+    # Verificacion
+    $activo = Get-NetTCPConnection -LocalPort $p -State Listen -ErrorAction SilentlyContinue
+    if ($activo) {
+        Write-Host "[OK] $servicio ONLINE en http://localhost:$p" -ForegroundColor Green
     } else {
-        Write-Host "[!] Error al iniciar $($s.Name) en puerto $p. Revisa los logs." -ForegroundColor Red
-    }
+        Write-Host "[!] Error: $servicio no escucha en puerto $p" -ForegroundColor Red
 
+        # Mostrar ultimo error de Apache si aplica
+        if ($servicio -eq "apache2") {
+            $logPath = "C:\Apache24\logs\error.log"
+            if (!(Test-Path $logPath)) { $logPath = "$env:APPDATA\Apache24\logs\error.log" }
+            if (Test-Path $logPath) {
+                Write-Host "    Ultimo error Apache:" -ForegroundColor Yellow
+                Get-Content $logPath -Tail 3 | ForEach-Object { Write-Host "    $_" -ForegroundColor Yellow }
+            }
+        }
+    }
     Pause
 }
 
 function Menu-HTTP {
     while ($true) {
         Clear-Host
-        Monitor-Servicios
-        $mostrarPuerto = if ($global:PUERTO_ACTUAL) { $global:PUERTO_ACTUAL } else { "80 (Default)" }
-        Write-Host "================================================" -ForegroundColor Gray
-        Write-Host "              MODULO HTTP                       " -ForegroundColor Cyan
-        Write-Host "  Puerto configurado para despliegue: $mostrarPuerto" -ForegroundColor Yellow
-        Write-Host "================================================" -ForegroundColor Gray
-        Write-Host " 1) Instalar Nginx    | 2) Instalar Apache  | 3) Instalar Tomcat"
-        Write-Host " 4) Desplegar Nginx   | 5) Desplegar Apache | 6) Desplegar Tomcat"
-        Write-Host " 7) Configurar Puerto | 8) Volver"
-        Write-Host "------------------------------------------------" -ForegroundColor Gray
-        $op = Read-Host "Seleccione"
+        $mostrar_puerto = if ($global:PUERTO_ACTUAL -and $global:PUERTO_ACTUAL -ne "N/A") { $global:PUERTO_ACTUAL } else { "N/A" }
+        Write-Host ""
+        Write-Host "================================================" -ForegroundColor Cyan
+        Write-Host "                MODULO HTTP                     " -ForegroundColor Cyan
+        Write-Host "  Puerto configurado: $mostrar_puerto" -ForegroundColor Yellow
+        Write-Host "================================================" -ForegroundColor Cyan
+        Write-Host "1) Instalar Nginx"
+        Write-Host "2) Instalar Apache"
+        Write-Host "3) Instalar IIS (Rol Windows)"
+        Write-Host "4) Desplegar Nginx en puerto $mostrar_puerto"
+        Write-Host "5) Desplegar Apache en puerto $mostrar_puerto"
+        Write-Host "6) Desplegar IIS en puerto $mostrar_puerto"
+        Write-Host "7) Configurar Puerto"
+        Write-Host "8) Volver al Orquestador"
+        Write-Host "------------------------------------------------"
+        $opcion = Read-Host "Seleccione una opcion"
 
-        switch ($op) {
-            "1" { Comprobar-Instalacion "nginx"  $true }
-            "2" { Comprobar-Instalacion "apache" $true }
-            "3" { Comprobar-Instalacion "tomcat" $true }
-            "4" { aplicar_puerto_http "nginx" }
-            "5" { aplicar_puerto_http "apache" }
-            "6" { aplicar_puerto_http "tomcat" }
-            "7" { if (Get-Command Validar-Puerto -ErrorAction SilentlyContinue) { Validar-Puerto } }
+        switch ($opcion) {
+            "1" {
+                Get-Process nginx -ErrorAction SilentlyContinue | Stop-Process -Force
+                $chocoExe = "C:\ProgramData\chocolatey\bin\choco.exe"
+                if (Test-Path $chocoExe) { & $chocoExe install nginx -y | Out-Null; Write-Host "[OK] nginx instalado" -ForegroundColor Green }
+                Pause
+            }
+            "2" {
+                $chocoExe = "C:\ProgramData\chocolatey\bin\choco.exe"
+                if (Test-Path $chocoExe) { & $chocoExe install apache-httpd -y | Out-Null; Write-Host "[OK] apache instalado" -ForegroundColor Green }
+                Pause
+            }
+            "3" { Install-WindowsFeature -Name Web-Server -IncludeManagementTools; Pause }
+            "4" { Detener-Competencia "nginx";    Aplicar-Puerto-HTTP "nginx"    }
+            "5" { Detener-Competencia "apache2";  Aplicar-Puerto-HTTP "apache2"  }
+            "6" { Detener-Competencia "tomcat10"; Aplicar-Puerto-HTTP "tomcat10" }
+            "7" {
+                $nuevo = Read-Host "Ingrese el puerto HTTP (ej: 8080)"
+                if ($nuevo -match '^\d+$' -and [int]$nuevo -ge 1 -and [int]$nuevo -le 65535) {
+                    $global:PUERTO_ACTUAL = $nuevo
+                    Write-Host "[OK] Puerto configurado a $nuevo" -ForegroundColor Green
+                } else {
+                    Write-Host "[!] Puerto invalido." -ForegroundColor Red
+                }
+                Pause
+            }
             "8" { return }
-            default { Write-Host "[!] Opción no válida. Elige entre 1 y 8." -ForegroundColor Yellow; Pause }
+            default { Write-Host "Opcion no valida." -ForegroundColor Red }
         }
     }
 }
