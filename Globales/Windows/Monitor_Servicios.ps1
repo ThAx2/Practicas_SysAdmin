@@ -1,113 +1,184 @@
-# ==============================================================================
-# MONITOR DE SERVICIOS + INSTALACION - WINDOWS
-# ==============================================================================
+function Mon-Servicer {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Servicio,
 
-function Monitor-Servicios {
-    $dhcp = Get-Service DHCPServer -ErrorAction SilentlyContinue
-    $dns  = Get-Service DNS       -ErrorAction SilentlyContinue
-    $ftp  = Get-Service ftpsvc   -ErrorAction SilentlyContinue
-    $ssh  = Get-Service sshd     -ErrorAction SilentlyContinue
+        [ValidateSet('latest','previous')]
+        [string]$CanalVersion = 'latest',
 
-    $webActivo = "NINGUNO"; $colWeb = "Red"
-    if ((Get-Service nginx -ErrorAction SilentlyContinue).Status -eq "Running") {
-        $webActivo = "NGINX";  $colWeb = "Green"
-    } elseif ((Get-Service -Name "Apache*" -ErrorAction SilentlyContinue | Where-Object Status -eq "Running")) {
-        $webActivo = "APACHE"; $colWeb = "Green"
-    } elseif ((Get-Service W3SVC -ErrorAction SilentlyContinue).Status -eq "Running") {
-        $webActivo = "IIS";    $colWeb = "Green"
+        [string]$Version,
+
+        [switch]$Reinstalar,
+        [switch]$ReiniciarSiActivo
+    )
+
+    Write-Host "============================================" -ForegroundColor Gray
+    Write-Host "Monitoreando: $Servicio" -ForegroundColor Cyan
+
+    $servicioNorm = $Servicio.ToLower()
+    $svcName = $null
+    $instalado = $false
+
+    # Servicios que se instalan como Windows Feature (no por Chocolatey)
+    $featureMap = @{
+        "dhcpserver" = @{
+            Features = @("DHCP")
+            Service  = "DHCPServer"
+        }
+        "dns" = @{
+            Features = @("DNS")
+            Service  = "DNS"
+        }
+        "iis" = @{
+            Features = @("Web-Server")
+            Service  = "W3SVC"
+        }
+        "web-http" = @{
+            Features = @("Web-Server")
+            Service  = "W3SVC"
+        }
+        "ftp" = @{
+            Features = @("Web-Server","Web-Mgmt-Console","Web-FTP-Server","Web-FTP-Ext")
+            Service  = "FTPSVC"
+        }
     }
 
-    $stDHCP = if ($dhcp -and $dhcp.Status -eq "Running") { "RUNNING" } else { "STOPPED" }
-    $colDHCP = if ($stDHCP -eq "RUNNING") { "Green" } else { "Red" }
-    $stDNS  = if ($dns  -and $dns.Status  -eq "Running") { "RUNNING" } else { "STOPPED" }
-    $colDNS  = if ($stDNS  -eq "RUNNING")  { "Green" } else { "Red" }
-    $stFTP  = if ($ftp  -and $ftp.Status  -eq "Running") { "RUNNING" } else { "STOPPED" }
-    $colFTP  = if ($stFTP  -eq "RUNNING")  { "Green" } else { "Red" }
-    $stSSH  = if ($ssh  -and $ssh.Status  -eq "Running") { "RUNNING" } else { "STOPPED" }
-    $colSSH  = if ($stSSH  -eq "RUNNING")  { "Green" } else { "Red" }
+    # Mapeo general de nombre de paquete -> nombre real del servicio en Windows
+    $serviceMap = @{
+        "nginx"          = "nginx"
+        "apache2"        = "Apache2.4"
+        "httpd"          = "Apache2.4"
+        "mysql"          = "MySQL"
+        "mariadb"        = "MariaDB"
+        "openssh-server" = "sshd"
+        "ssh"            = "sshd"
+        "dhcpserver"     = "DHCPServer"
+        "dns"            = "DNS"
+        "iis"            = "W3SVC"
+        "web-http"       = "W3SVC"
+        "ftp"            = "FTPSVC"
+    }
 
-    $p = if ($global:PUERTO_ACTUAL -and $global:PUERTO_ACTUAL -ne "N/A") { $global:PUERTO_ACTUAL } else { "N/A" }
+    # 1) INSTALACION: Windows Feature
+    if ($featureMap.ContainsKey($servicioNorm)) {
+        $features = $featureMap[$servicioNorm].Features
+        $svcName  = $featureMap[$servicioNorm].Service
 
-    Write-Host "----------------------------------------------------------" -ForegroundColor Gray
-    Write-Host " DHCP: "  -NoNewline; Write-Host $stDHCP -ForegroundColor $colDHCP -NoNewline
-    Write-Host " | DNS: " -NoNewline; Write-Host $stDNS  -ForegroundColor $colDNS  -NoNewline
-    Write-Host " | FTP: " -NoNewline; Write-Host $stFTP  -ForegroundColor $colFTP  -NoNewline
-    Write-Host " | SSH: " -NoNewline; Write-Host $stSSH  -ForegroundColor $colSSH
-    Write-Host " WEB: "   -NoNewline; Write-Host $webActivo -ForegroundColor $colWeb -NoNewline
-    Write-Host " | Puerto HTTP: " -NoNewline; Write-Host $p -ForegroundColor Cyan
-    Write-Host "----------------------------------------------------------" -ForegroundColor Gray
-}
-
-function Comprobar-Instalacion {
-    param($Feature, [bool]$esTercero = $false)
-
-    if ($esTercero) {
-        $chocoExe = "$env:ChocolateyInstall\bin\choco.exe"
-        if (!(Test-Path $chocoExe)) { $chocoExe = "C:\ProgramData\chocolatey\bin\choco.exe" }
-        if (!(Test-Path $chocoExe)) {
-            Write-Host "[!] ERROR: Chocolatey no encontrado. Instalalo desde https://chocolatey.org" -ForegroundColor Red
-            return
-        }
-
-        [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor 3072
-
-        $pkg = switch ($Feature) {
-            "apache"  { "apache-httpd" }
-            "apache2" { "apache-httpd" }
-            "tomcat"  { "tomcat"       }
-            default   { $Feature }
-        }
-
-        if ($Feature -eq "tomcat") {
-            Write-Host "[*] Instalando Dependencia: Java..." -ForegroundColor Yellow
-            & $chocoExe install openjdk -y
-        }
-
-        Write-Host "[*] Consultando Chocolatey para $pkg..." -ForegroundColor Cyan
-        $v = & $chocoExe search $pkg --exact --limit-output | Select-Object -First 5
-
-        if ($null -eq $v -or $v.Count -eq 0) {
-            Write-Host "[!] Instalando version por defecto..." -ForegroundColor Yellow
-            & $chocoExe install $pkg -y --force
-        } else {
-            Write-Host "Versiones encontradas:"
-            for ($i = 0; $i -lt $v.Count; $i++) {
-                $linea = $v[$i].ToString().Split('|')
-                Write-Host "$($i+1)) $($linea[0]) v$($linea[1])"
+        try {
+            if ($Reinstalar) {
+                Write-Host "Reinstalando features de $Servicio..." -ForegroundColor Yellow
+                foreach ($featureName in $features) {
+                    $f = Get-WindowsFeature -Name $featureName -ErrorAction Stop
+                    if ($f.Installed) {
+                        Uninstall-WindowsFeature -Name $featureName -ErrorAction Stop | Out-Null
+                    }
+                }
             }
-            $sel = Read-Host "Elija numero (o 'd' para ultima / ENTER para defecto)"
 
-            if ($sel -eq 'd' -or [string]::IsNullOrWhiteSpace($sel)) {
-                & $chocoExe install $pkg -y --force
-            } else {
-                $selInt = 0
-                if ([int]::TryParse($sel, [ref]$selInt) -and $selInt -ge 1 -and $selInt -le $v.Count) {
-                    $v_final = ($v[$selInt - 1].ToString().Split('|'))[1]
-                    & $chocoExe install $pkg --version $v_final -y --force
+            foreach ($featureName in $features) {
+                $f = Get-WindowsFeature -Name $featureName -ErrorAction Stop
+                if (-not $f.Installed) {
+                    Write-Host "Instalando Feature '$featureName'..." -ForegroundColor Yellow
+                    Install-WindowsFeature -Name $featureName -IncludeManagementTools -ErrorAction Stop | Out-Null
                 } else {
-                    Write-Host "[!] Seleccion invalida. Instalando version por defecto." -ForegroundColor Yellow
-                    & $chocoExe install $pkg -y --force
+                    Write-Host "Feature '$featureName' ya esta instalada." -ForegroundColor Green
                 }
             }
         }
-        Pause
-    } else {
-        if (!(Get-WindowsFeature $Feature -ErrorAction SilentlyContinue).Installed) {
-            Install-WindowsFeature $Feature -IncludeManagementTools
+        catch {
+            throw "Error instalando feature(s) de '$Servicio': $($_.Exception.Message)"
         }
     }
-}
+    # 2) INSTALACION: Chocolatey
+    else {
+        $choco = "C:\ProgramData\chocolatey\bin\choco.exe"
+        if (-not (Test-Path $choco)) {
+            throw "Chocolatey no encontrado en $choco"
+        }
 
-function Validar-Puerto {
-    while ($true) {
-        $nuevo = Read-Host "Ingrese el puerto HTTP a configurar (1-65535)"
-        if ($nuevo -match '^\d+$' -and [int]$nuevo -ge 1 -and [int]$nuevo -le 65535) {
-            $global:PUERTO_ACTUAL = $nuevo
-            Write-Host "[OK] Puerto configurado a $nuevo" -ForegroundColor Green
-            Pause
-            return
+        $vSel = $null
+        if ($Version) {
+            $vSel = $Version
         } else {
-            Write-Host "[!] Puerto invalido. Ingrese un numero entre 1 y 65535." -ForegroundColor Red
+            $listaV = & $choco search $Servicio --exact --all-versions --limit-output 2>$null |
+                Select-Object -First 2 |
+                ForEach-Object {
+                    $parts = $_.ToString().Split('|')
+                    if ($parts.Count -ge 2) { $parts[1] }
+                }
+
+            $versiones = @($listaV)
+            if ($versiones.Count -gt 0) {
+                $vSel = if ($CanalVersion -eq 'previous' -and $versiones.Count -gt 1) { $versiones[1] } else { $versiones[0] }
+            }
+        }
+
+        $localList = & $choco list --local-only --exact $Servicio 2>$null
+        if ($localList | Select-String -SimpleMatch $Servicio) { $instalado = $true }
+
+        if (-not $instalado -or $Reinstalar) {
+            if ($instalado -and $Reinstalar) {
+                Write-Host "Reinstalando $Servicio..." -ForegroundColor Yellow
+                $args = @('install', $Servicio, '--force', '-y')
+            } else {
+                Write-Host "Instalando $Servicio..." -ForegroundColor Yellow
+                $args = @('install', $Servicio, '-y')
+            }
+
+            if ($vSel) { $args += @('--version', $vSel) }
+            & $choco @args
+
+            $localList = & $choco list --local-only --exact $Servicio 2>$null
+            if (-not ($localList | Select-String -SimpleMatch $Servicio)) {
+                throw "Error al instalar/reinstalar $Servicio."
+            }
+        } else {
+            Write-Host "$Servicio ya esta instalado." -ForegroundColor Green
+        }
+
+        # Hardening opcional
+        if ($servicioNorm -eq "nginx") {
+            $nginxConf = "C:\tools\nginx\conf\nginx.conf"
+            if (Test-Path $nginxConf) {
+                (Get-Content $nginxConf) -replace '# server_tokens off;', 'server_tokens off;' | Set-Content $nginxConf
+                Write-Host "[*] nginx.conf actualizado: server_tokens off." -ForegroundColor Cyan
+            }
+        } elseif ($servicioNorm -eq "apache2" -or $servicioNorm -eq "httpd") {
+            $apacheConf = "C:\Apache24\conf\extra\httpd-security.conf"
+            if (Test-Path $apacheConf) {
+                $content = Get-Content $apacheConf | Where-Object { $_ -notmatch 'ServerTokens' }
+                $content += "ServerTokens Prod"
+                Set-Content $apacheConf $content
+                Write-Host "[*] httpd-security.conf actualizado: ServerTokens Prod." -ForegroundColor Cyan
+            }
+        }
+
+        if (-not $svcName) {
+            $svcName = if ($serviceMap.ContainsKey($servicioNorm)) { $serviceMap[$servicioNorm] } else { $Servicio }
         }
     }
+
+    # 3) ESTADO DEL SERVICIO (iniciar/reiniciar)
+    if (-not $svcName) {
+        $svcName = if ($serviceMap.ContainsKey($servicioNorm)) { $serviceMap[$servicioNorm] } else { $Servicio }
+    }
+
+    $svc = Get-Service -Name $svcName -ErrorAction SilentlyContinue
+    if ($null -eq $svc) {
+        Write-Host "[!] Servicio '$svcName' no encontrado en el sistema." -ForegroundColor Yellow
+    } elseif ($svc.Status -ne "Running") {
+        Start-Service -Name $svcName
+        Write-Host "Estado: $svcName iniciado." -ForegroundColor Green
+    } else {
+        if ($ReiniciarSiActivo) {
+            Restart-Service -Name $svcName
+            Write-Host "Estado: $svcName reiniciado." -ForegroundColor Green
+        } else {
+            Write-Host "Estado: $svcName ya esta activo." -ForegroundColor Green
+        }
+    }
+
+    Write-Host "Procesamiento de $Servicio finalizado."
+    Write-Host "============================================`n" -ForegroundColor Gray
 }

@@ -1,53 +1,58 @@
 function Menu-DNS {
-    Comprobar-Instalacion -Feature "DNS"
+
     do {
-        Clear-Host
-        Monitor-Servicios
-        Write-Host "=== GESTION DNS ===" -ForegroundColor Yellow
-        Write-Host "1) ALTA (Directa + Inversa)"
-        Write-Host "2) BAJA (Directa + Inversa)"
-        Write-Host "3) CONSULTA TOTAL"
+        Mon-Servicer -Servicio dns
+       
+        if (Get-Command Monitor-Servicios -ErrorAction SilentlyContinue) { Monitor-Servicios }
+        
+        Write-Host "=== GESTION DNS (INTEGRADO EN AD) ===" -ForegroundColor Yellow
+        Write-Host "1) ALTA (Directa e Inversa)"
+        Write-Host "2) BAJA (Remocion de Zonas)"
+        Write-Host "3) CONSULTA DE REGISTROS"
         Write-Host "4) Volver"
         $op = Read-Host "Opcion"
 
         switch ($op) {
             "1" {
-                $zona = Read-Host "Nombre Dominio"
-                if (-not $Global:InterfazActiva) { $Global:InterfazActiva = Read-Host "Nombre Interfaz" }
-                $ip_def = (Get-NetIPAddress -InterfaceAlias $Global:InterfazActiva -AddressFamily IPv4).IPAddress[0]
-                $ip = Read-Host "IP Destino (Enter para $ip_def)"
-                if (-not $ip) { $ip = $ip_def }
+                $zona = Read-Host "Nombre del Dominio (ej: ayala.local)"
+                # Detectar IP si no hay interfaz activa global
+                $ip_actual = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.InterfaceAlias -notlike "*Loopback*" }).IPAddress[0]
+                $ip = Read-Host "IP del Servidor (Enter para $ip_actual)"
+                if (-not $ip) { $ip = $ip_actual }
 
+                # --- ZONA DIRECTA ---
                 if (-not (Get-DnsServerZone -Name $zona -ErrorAction SilentlyContinue)) {
-                    Add-DnsServerPrimaryZone -Name $zona -ZoneFile "$zona.dns" -ErrorAction SilentlyContinue
+                    Add-DnsServerPrimaryZone -Name $zona -ReplicationScope Forest
+                    Write-Host "[+] Zona Directa '$zona' creada." -ForegroundColor Green
                 }
                 Add-DnsServerResourceRecordA -Name "@" -ZoneName $zona -IPv4Address $ip -ErrorAction SilentlyContinue
                 Add-DnsServerResourceRecordA -Name "www" -ZoneName $zona -IPv4Address $ip -ErrorAction SilentlyContinue
                 
-                $oct = $ip.Split('.'); $inv = "$($oct[2]).$($oct[1]).$($oct[0]).in-addr.arpa"
+                # --- ZONA INVERSA ---
+                $oct = $ip.Split('.')
+                $inv = "$($oct[2]).$($oct[1]).$($oct[0]).in-addr.arpa"
                 if (-not (Get-DnsServerZone -Name $inv -ErrorAction SilentlyContinue)) {
-                    Add-DnsServerPrimaryZone -Name $inv -ZoneFile "$inv.dns" -ErrorAction SilentlyContinue
+                    Add-DnsServerPrimaryZone -Name $inv -ReplicationScope Forest
+                    Write-Host "[+] Zona Inversa '$inv' creada." -ForegroundColor Green
                 }
                 Add-DnsServerResourceRecordPtr -Name $oct[3] -ZoneName $inv -PtrDomainName "$zona." -ErrorAction SilentlyContinue
-                Write-Host "[OK] Alta completada." -ForegroundColor Green; Pause
+                
+                Write-Host "[OK] Proceso finalizado." -ForegroundColor Cyan; Pause
             }
+
             "2" {
                 $zona = Read-Host "Dominio a borrar"
-                $rec = Get-DnsServerResourceRecord -ZoneName $zona -Name "@" -RRType A -ErrorAction SilentlyContinue
-                $ip_z = if ($rec) { $rec.RecordData.IPv4Address.IPAddressToString } else { $null }
-                
-                Remove-DnsServerZone -Name $zona -Force -ErrorAction SilentlyContinue
-                if ($ip_z) {
-                    $oct = $ip_z.Split('.'); $inv = "$($oct[2]).$($oct[1]).$($oct[0]).in-addr.arpa"
-                    Remove-DnsServerZone -Name $inv -Force -ErrorAction SilentlyContinue
-                    Write-Host "[!] Borrada zona directa e inversa ($inv)." -ForegroundColor Yellow
+                if ($zona) {
+                    Remove-DnsServerZone -Name $zona -Force -ErrorAction SilentlyContinue
+                    Write-Host "[!] Zona $zona eliminada." -ForegroundColor Yellow
                 }
                 Pause
             }
+
             "3" {
-                Get-DnsServerZone | ForEach-Object { 
+                Get-DnsServerZone | Where-Object { $_.ZoneName -notlike "TrustAnchors*" } | ForEach-Object {
                     Write-Host "`n>> $($_.ZoneName)" -ForegroundColor Magenta
-                    Get-DnsServerResourceRecord -ZoneName $_.ZoneName | ft HostName,RecordType,RecordData -AutoSize
+                    Get-DnsServerResourceRecord -ZoneName $_.ZoneName | Format-Table HostName, RecordType, RecordData -AutoSize
                 }
                 Pause
             }

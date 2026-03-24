@@ -1,6 +1,6 @@
 function Menu-DHCP {
-    Comprobar-Instalacion -Feature "DHCP"
-    Clear-Host
+     Mon-Servicer "DHCPServer"
+    
     Write-Host "=== CONFIGURACION DHCP (GATEWAY OPCIONAL) ===" -ForegroundColor Yellow
     $Global:InterfazActiva = Read-Host "Interfaz (ej: Ethernet 2)"
     $ip_s = Read-Host "IP Servidor (ej: 10.10.10.3)"

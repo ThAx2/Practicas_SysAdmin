@@ -10,6 +10,7 @@ $Global:FTP_ROOT   = "C:\FTP_Users"
 $Global:LOCAL_USER = "$Global:FTP_ROOT\LocalUser"
 
 function Configurar_Servicio_FTP {
+   Mon-Servicer -Servicio dns
     Write-Host "[+] Automatizando configuracion de FTP (IIS)..." -ForegroundColor Cyan
 
     $appcmd = "$env:windir\system32\inetsrv\appcmd.exe"
