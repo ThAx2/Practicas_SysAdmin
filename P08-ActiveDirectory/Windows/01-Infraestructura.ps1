@@ -1,18 +1,14 @@
 # ==============================================================================
-# P08 - 01-Infraestructura.ps1 (VERSIÓN DINÁMICA CORREGIDA)
-# AD DS, UOs, Grupos, Usuarios CSV, Horarios, Carpetas, NTFS, HomeDrive
+# P09 - 01-Infraestructura.ps1 (VERSIÓN FINAL)
 # ==============================================================================
 
 $Dominio     = "ayala.local"
 $NetBIOS     = "AYALA"
 $DomainDN    = "DC=ayala,DC=local"
 $StorageBase = "C:\GestionAD\Storage"
-$CSVPath     = "C:\Users\Administrator\Practicas_SysAdm\P08-ActiveDirectory\Windows\Usuarios.csv"
-$ServerName  = hostname # <--- AGREGADO PARA RUTA DINÁMICA
+$CSVPath     = "P08-ActiveDirectory\Windows\Usuarios.csv"
+$ServerName  = hostname
 
-# ----------------------------------------------------------------
-# 1. Instalar AD DS
-# ----------------------------------------------------------------
 function Instalar-ADDS {
     if (!(Get-WindowsFeature AD-Domain-Services).Installed) {
         Write-Host "[*] Instalando AD DS..." -ForegroundColor Cyan
@@ -23,9 +19,6 @@ function Instalar-ADDS {
     }
 }
 
-# ----------------------------------------------------------------
-# 2. Promover a DC
-# ----------------------------------------------------------------
 function Promover-DC {
     try {
         Get-ADDomain -ErrorAction Stop | Out-Null
@@ -34,21 +27,15 @@ function Promover-DC {
         Write-Host "[*] Promoviendo a Domain Controller..." -ForegroundColor Cyan
         $SafePass = ConvertTo-SecureString "Admin123!" -AsPlainText -Force
         Install-ADDSForest `
-            -DomainName                     $Dominio `
-            -DomainNetbiosName              $NetBIOS `
+            -DomainName                    $Dominio `
+            -DomainNetbiosName             $NetBIOS `
             -SafeModeAdministratorPassword $SafePass `
-            -InstallDns `
-            -Force `
-            -NoRebootOnCompletion
+            -InstallDns -Force -NoRebootOnCompletion
         Write-Host "[OK] DC promovido. REINICIA el servidor." -ForegroundColor Green
-        Pause
-        Exit
+        Pause; Exit
     }
 }
 
-# ----------------------------------------------------------------
-# 3. Crear UOs
-# ----------------------------------------------------------------
 function Crear-UOs {
     Import-Module ActiveDirectory
     foreach ($ou in @("Cuates","NoCuates")) {
@@ -62,9 +49,6 @@ function Crear-UOs {
     }
 }
 
-# ----------------------------------------------------------------
-# 4. Crear Grupos
-# ----------------------------------------------------------------
 function Crear-Grupos {
     foreach ($g in @("Cuates","NoCuates")) {
         $ou = "OU=$g,$DomainDN"
@@ -77,15 +61,11 @@ function Crear-Grupos {
     }
 }
 
-# ----------------------------------------------------------------
-# 5. Horarios en bytes (UTC-7 Mexico)
-# ----------------------------------------------------------------
 function Get-LogonHoursBytes {
     param([string]$Grupo)
     $bytes    = New-Object byte[] 21
-    $dias     = 1..5 # Lunes a Viernes
+    $dias     = 1..5
     $horasUTC = if ($Grupo -eq "Cuates") { 15..21 } else { @(22,23) + (0..8) }
-
     foreach ($dia in $dias) {
         foreach ($hora in $horasUTC) {
             $bitPos  = ($dia * 24) + $hora
@@ -99,16 +79,12 @@ function Get-LogonHoursBytes {
     return $bytes
 }
 
-# ----------------------------------------------------------------
-# 6. Crear Usuarios desde CSV
-# ----------------------------------------------------------------
 function Crear-Usuarios {
     if (!(Test-Path $CSVPath)) {
         Write-Host "[!] CSV no encontrado en: $CSVPath" -ForegroundColor Red
         return
     }
 
-    # --- AGREGADO: CREAR RECURSO COMPARTIDO PARA LA RED ---
     if (!(Get-SmbShare -Name "Storage" -ErrorAction SilentlyContinue)) {
         New-SmbShare -Name "Storage" -Path $StorageBase -FullAccess "Everyone"
     }
@@ -117,16 +93,16 @@ function Crear-Usuarios {
     Write-Host "[*] Usuarios detectados en CSV: $($usuarios.Count)" -ForegroundColor Cyan
 
     foreach ($u in $usuarios) {
-        $sam    = $u.Cuenta.Trim()
-        $nombre = $u.Nombre.Trim()
-        $pass   = $u.Password.Trim()
-        $depto  = ($u.Departamento.Trim()) -replace "\s+",""
-        $ouPath = "OU=$depto,$DomainDN"
+        $sam        = $u.Cuenta.Trim()
+        $nombre     = $u.Nombre.Trim()
+        $pass       = $u.Password.Trim()
+        $depto      = ($u.Departamento.Trim()) -replace "\s+",""
+        $ouPath     = "OU=$depto,$DomainDN"
         $passSecure = ConvertTo-SecureString $pass -AsPlainText -Force
 
         Write-Host "`n--- Procesando: $sam ($depto) ---" -ForegroundColor White
 
-        # 1. Crear o detectar usuario
+        # 1. Crear usuario
         if (!(Get-ADUser -Filter "SamAccountName -eq '$sam'")) {
             try {
                 New-ADUser -Name $nombre -DisplayName $nombre -SamAccountName $sam `
@@ -153,16 +129,19 @@ function Crear-Usuarios {
             Write-Host "  [!] Horario: $($_.Exception.Message)" -ForegroundColor Red
         }
 
-        # 4. Carpeta personal (Local en Server)
+        # 4. Carpeta personal
         $carpeta = "$StorageBase\$depto\$sam"
         if (!(Test-Path $carpeta)) {
             New-Item -Path $carpeta -ItemType Directory -Force | Out-Null
         }
-        
+
         # 5. Permisos NTFS
         try {
-            $acl = Get-Acl $carpeta
-            $rule = New-Object System.Security.AccessControl.FileSystemAccessRule("$NetBIOS\$sam", "Modify", "ContainerInherit,ObjectInherit", "None", "Allow")
+            $acl  = Get-Acl $carpeta
+            $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+                "$NetBIOS\$sam", "Modify",
+                "ContainerInherit,ObjectInherit", "None", "Allow"
+            )
             $acl.SetAccessRule($rule)
             Set-Acl -Path $carpeta -AclObject $acl
             Write-Host "  [OK] Permisos NTFS aplicados." -ForegroundColor Green
@@ -170,25 +149,38 @@ function Crear-Usuarios {
             Write-Host "  [!] NTFS error: $($_.Exception.Message)" -ForegroundColor Red
         }
 
-        # 6. Home Drive H: (RUTA UNC DINÁMICA PARA EL CLIENTE)
-        $RutaRed = "\\$ServerName\Storage\$depto\$sam" # <--- CAMBIO CLAVE
+        # 6. Home Drive
+        $RutaRed = "\\$ServerName\Storage\$depto\$sam"
         Set-ADUser -Identity $sam -HomeDirectory $RutaRed -HomeDrive "H:"
-        Write-Host "  [->] $sam : HomeDrive configurado en $RutaRed" -ForegroundColor Cyan
+        Write-Host "  [->] HomeDrive: $RutaRed" -ForegroundColor Cyan
+
+        # 7. Cuota FSRM (NUEVO - aplica automático a nuevos usuarios)
+        try {
+            $plantilla = if ($depto -eq "Cuates") { "Cuota-Cuates" } else { "Cuota-NoCuates" }
+            $cuotaExistente = Get-FsrmQuota -Path $carpeta -ErrorAction SilentlyContinue
+            if ($cuotaExistente) {
+                Set-FsrmQuota -Path $carpeta -Template $plantilla
+            } else {
+                New-FsrmQuota -Path $carpeta -Template $plantilla
+            }
+            Write-Host "  [OK] Cuota $plantilla aplicada." -ForegroundColor Green
+        } catch {
+            Write-Host "  [!] Cuota error: $($_.Exception.Message)" -ForegroundColor Red
+        }
     }
 }
 
 # ----------------------------------------------------------------
-# MAIN EXECUTION
+# MAIN
 # ----------------------------------------------------------------
 Clear-Host
-Write-Host "=== P08 INFRAESTRUCTURA AD ===" -ForegroundColor Cyan
+Write-Host "=== P09 INFRAESTRUCTURA AD ===" -ForegroundColor Cyan
 Instalar-ADDS
 
 try {
     Get-ADDomain -ErrorAction Stop | Out-Null
     Write-Host "[OK] Dominio activo: $Dominio" -ForegroundColor Green
 
-    # Asegurar UOs, Grupos y Carpetas Base
     Crear-UOs
     Crear-Grupos
 
@@ -199,8 +191,11 @@ try {
     }
 
     Crear-Usuarios
-    Write-Host "`n[OK] INFRAESTRUCTURA COMPLETADA EXITOSAMENTE." -ForegroundColor Green
+    Write-Host "`n[OK] INFRAESTRUCTURA COMPLETADA." -ForegroundColor Green
 } catch {
     Promover-DC
 }
+
+sc.exe config appidsvc start= auto
+Start-Service appidsvc
 Pause

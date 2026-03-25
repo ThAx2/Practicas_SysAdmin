@@ -1,117 +1,90 @@
 # ==============================================================================
-# PROYECTO: P08 - CONTROL DE EJECUCIÓN CON APPLOCKER
-# OBJETIVO: Bloqueo dinámico de Notepad para la OU NoCuates (Hash + Path)
-# ENTORNO: Windows Server Core -> Windows 10 Enterprise
+# P09 - AppLocker por HASH (VERSIÓN FINAL FUNCIONAL)
+# Usa Set-AppLockerPolicy -Ldap que registra el CSE correctamente
 # ==============================================================================
 
-Import-Module ActiveDirectory
 Import-Module GroupPolicy
+Import-Module ActiveDirectory
 
-# --- CONFIGURACIÓN DE VARIABLES ---
-$Dominio      = "ayala.local"
-$DomainDN     = "DC=ayala,DC=local"
-$GpoName      = "AppLocker-FINAL-P08"
-$sidAdmin     = "S-1-5-32-544"   # Built-in Administrators
-$sidTodos     = "S-1-1-0"        # Everyone
-$ouNoCuates   = "NoCuates"
-$ouCuates     = "Cuates"
+$Dominio  = "ayala.local"
+$DomainDN = "DC=ayala,DC=local"
+$GpoName  = "AppLocker-FINAL-P08"
 
-Write-Host "[*] Iniciando despliegue de políticas de AppLocker..." -ForegroundColor Cyan
+$sidNoCuates = (Get-ADGroup "NoCuates").SID.Value
+$sidAdmin    = "S-1-5-32-544"
+$sidEveryone = "S-1-1-0"
 
-# 1. OBTENER SID DE LA OU DESTINO
-try {
-    $groupNoCuates = Get-ADGroup -Identity $ouNoCuates -ErrorAction Stop
-    $sidNoCuates = $groupNoCuates.SID.Value
-    Write-Host "[+] SID NoCuates detectado: $sidNoCuates" -ForegroundColor Green
-} catch {
-    Write-Host "[!] ERROR: No se encontró el grupo/OU $ouNoCuates en el AD." -ForegroundColor Red
-    return
-}
+Write-Host "[*] SID NoCuates: $sidNoCuates" -ForegroundColor Cyan
 
-# 2. DEFINICIÓN DE HASHES (CLIENTE Y SERVIDOR)
-$hashCliente  = "F9D9B9DED9A67AA3CFDBD5002F3B524B265C4086C188E1BE7C936AB25627BF01"
-$sizeCliente  = 201216
-$hashServidor = (Get-FileHash "$env:windir\System32\notepad.exe" -Algorithm SHA256).Hash
-$sizeServidor = (Get-Item "$env:windir\System32\notepad.exe").Length
-
-# 3. CONSTRUCCIÓN DEL XML COMPLETO (Sintaxis Estricta)
-$xmlPolicy = @"
-<AppLockerPolicy Version="1">
-  <RuleCollection Type="Exe" EnforcementMode="Enabled">
-    
-    <FileHashRule Id="$([Guid]::NewGuid())" Name="DENY_NOTEPAD_HASH_CLIENTE" Description="Bloqueo total por Hash" UserOrGroupSid="$sidNoCuates" Action="Deny">
-      <Conditions>
-        <FileHashCondition>
-          <FileHash Type="SHA256" Data="0x$hashCliente" SourceFileName="notepad.exe" SourceFileLength="$sizeCliente" />
-        </FileHashCondition>
-      </Conditions>
-    </FileHashRule>
-
-    <FileHashRule Id="$([Guid]::NewGuid())" Name="DENY_NOTEPAD_HASH_SERVER" Description="Bloqueo por Hash del binario local" UserOrGroupSid="$sidNoCuates" Action="Deny">
-      <Conditions>
-        <FileHashCondition>
-          <FileHash Type="SHA256" Data="0x$hashServidor" SourceFileName="notepad.exe" SourceFileLength="$sizeServidor" />
-        </FileHashCondition>
-      </Conditions>
-    </FileHashRule>
-
-    <FilePathRule Id="11111111-1111-1111-1111-111111111111" Name="ALLOW_ALL_ADMINS" Description="Acceso irrestricto" UserOrGroupSid="$sidAdmin" Action="Allow">
-      <Conditions>
-        <FilePathCondition Path="*" />
-      </Conditions>
-    </FilePathRule>
-
-    <FilePathRule Id="$([Guid]::NewGuid())" Name="ALLOW_WINDOWS_DIR" UserOrGroupSid="$sidTodos" Action="Allow">
-      <Conditions><FilePathCondition Path="%WINDIR%\*" /></Conditions>
-    </FilePathRule>
-
-    <FilePathRule Id="$([Guid]::NewGuid())" Name="ALLOW_PROGRAM_FILES" UserOrGroupSid="$sidTodos" Action="Allow">
-      <Conditions><FilePathCondition Path="%PROGRAMFILES%\*" /></Conditions>
-    </FilePathRule>
-
-  </RuleCollection>
-  <RuleCollection Type="Msi" EnforcementMode="NotConfigured" />
-  <RuleCollection Type="Script" EnforcementMode="NotConfigured" />
-  <RuleCollection Type="Appx" EnforcementMode="NotConfigured" />
-</AppLockerPolicy>
-"@
-
-# 4. MANEJO DE LA GPO Y CARGA DE POLÍTICA
-$xmlPath = "$env:TEMP\AppLocker_Final_P08.xml"
-$xmlPolicy | Out-File -FilePath $xmlPath -Encoding UTF8 -Force
-
+# --- Crear GPO si no existe ---
 $gpo = Get-GPO -Name $GpoName -ErrorAction SilentlyContinue
 if (!$gpo) {
-    $gpo = New-GPO -Name $GpoName -Comment "P08 - Control de Software"
-    Write-Host "[+] GPO '$GpoName' creada desde cero." -ForegroundColor Green
+    $gpo = New-GPO -Name $GpoName -Domain $Dominio
+    Write-Host "[OK] GPO creada: $GpoName" -ForegroundColor Green
+} else {
+    Write-Host "[*] GPO ya existe: $GpoName" -ForegroundColor Yellow
 }
 
-# IMPORTANTE: Esto vincula el XML internamente y actualiza el número de versión (evita los 72 bytes)
-Import-AppLockerPolicy -XmlPolicy $xmlPath -TargetGpo $GpoName
-Write-Host "[+] Política importada exitosamente a la GPO." -ForegroundColor Green
-
-# 5. VINCULACIÓN DINÁMICA A OUs
-$targetOUs = @("OU=$ouNoCuates,$DomainDN")
-
-foreach ($path in $targetOUs) {
-    if (Test-Path "AD:\$path") {
-        New-GPLink -Name $GpoName -Target $path -ErrorAction SilentlyContinue | Out-Null
-        Write-Host "[+] GPO vinculada a $path" -ForegroundColor Green
+# --- Vincular a OUs ---
+foreach ($ou in @("Cuates","NoCuates")) {
+    $ouPath = "OU=$ou,$DomainDN"
+    $links  = (Get-GPInheritance -Target $ouPath).GpoLinks |
+              Where-Object { $_.DisplayName -eq $GpoName }
+    if (!$links) {
+        New-GPLink -Name $GpoName -Target $ouPath -LinkEnabled Yes
+        Write-Host "[OK] GPO vinculada a: $ouPath" -ForegroundColor Green
     } else {
-        Write-Host "[!] ADVERTENCIA: La ruta $path no existe." -ForegroundColor Yellow
+        Write-Host "[*] Ya vinculada a: $ouPath" -ForegroundColor Yellow
     }
 }
 
-# 6. LIMPIEZA DE VÍNCULOS EN CUATES (Para asegurar que ellos sí puedan abrirlo)
-try {
-    Remove-GPLink -Name $GpoName -Target "OU=$ouCuates,$DomainDN" -ErrorAction SilentlyContinue
-    Write-Host "[*] GPO desvinculada de $ouCuates (acceso libre)." -ForegroundColor Yellow
-} catch {}
+# --- AppIDSvc automático via GPO ---
+Set-GPRegistryValue -Name $GpoName `
+    -Key "HKLM\SYSTEM\CurrentControlSet\Services\AppIDSvc" `
+    -ValueName "Start" -Type DWord -Value 2
 
-# 7. FINALIZACIÓN Y REFRESCO
-Invoke-GPUpdate -Force
-Write-Host "`n--- RESUMEN DE DESPLIEGUE ---" -ForegroundColor Cyan
-Write-Host "NoCuates -> BLOQUEADO (Notepad por Hash)" -ForegroundColor Red
-Write-Host "Cuates   -> PERMITIDO (Sin GPO)" -ForegroundColor Green
-Write-Host "Admins   -> PERMITIDO (Regla de bypass)" -ForegroundColor White
-Write-Host "`nPROCESO COMPLETADO. En el cliente ejecuta: gpupdate /force" -ForegroundColor Cyan
+# --- XML con hash correcto del cliente ---
+$gpoGuid = $gpo.Id.ToString()
+
+$xmlPolicy = @"
+<AppLockerPolicy Version="1">
+  <RuleCollection Type="Exe" EnforcementMode="Enabled">
+    <FilePathRule Id="$(([Guid]::NewGuid()).ToString())" Name="Permitir Administradores" Description="Admins pueden ejecutar todo" Action="Allow" UserOrGroupSid="$sidAdmin">
+      <Conditions><FilePathCondition Path="*" /></Conditions>
+    </FilePathRule>
+    <FilePathRule Id="$(([Guid]::NewGuid()).ToString())" Name="Permitir Windows" Description="Ejecutables del sistema" Action="Allow" UserOrGroupSid="$sidEveryone">
+      <Conditions><FilePathCondition Path="%WINDIR%\*" /></Conditions>
+    </FilePathRule>
+    <FilePathRule Id="$(([Guid]::NewGuid()).ToString())" Name="Permitir Program Files" Description="Ejecutables instalados" Action="Allow" UserOrGroupSid="$sidEveryone">
+      <Conditions><FilePathCondition Path="%PROGRAMFILES%\*" /></Conditions>
+    </FilePathRule>
+    <FileHashRule Id="$(([Guid]::NewGuid()).ToString())" Name="Bloquear Notepad NoCuates" Description="Bloquea notepad por hash aunque cambien nombre" Action="Deny" UserOrGroupSid="$sidNoCuates">
+      <Conditions>
+        <FileHashCondition>
+          <FileHash Type="SHA256" Data="0x0C386FA6ABFDEFFBBEFF5BCE97D461340A23D1981458607BD9E5EEFF4066789A" SourceFileName="notepad.exe" SourceFileLength="201216" />
+        </FileHashCondition>
+      </Conditions>
+    </FileHashRule>
+  </RuleCollection>
+  <RuleCollection Type="Script" EnforcementMode="NotConfigured" />
+  <RuleCollection Type="Msi"    EnforcementMode="NotConfigured" />
+  <RuleCollection Type="Appx"   EnforcementMode="NotConfigured" />
+</AppLockerPolicy>
+"@
+
+# --- Aplicar con Set-AppLockerPolicy (método oficial, registra CSE correctamente) ---
+$tmpXml   = "$env:TEMP\applocker_p09.xml"
+$utf8NoBom = New-Object System.Text.UTF8Encoding $false
+[System.IO.File]::WriteAllText($tmpXml, $xmlPolicy, $utf8NoBom)
+
+Set-AppLockerPolicy -XmlPolicy $tmpXml `
+    -Ldap "LDAP://CN={$gpoGuid},CN=Policies,CN=System,DC=ayala,DC=local"
+
+Write-Host "[OK] AppLocker aplicado via Set-AppLockerPolicy" -ForegroundColor Green
+
+gpupdate /force
+Write-Host "[OK] gpupdate completado." -ForegroundColor Green
+Write-Host "`n=== EN EL CLIENTE ejecuta ===" -ForegroundColor Yellow
+Write-Host "  gpupdate /force" -ForegroundColor Cyan
+Write-Host "  Reinicia el cliente" -ForegroundColor Cyan
+Pause
