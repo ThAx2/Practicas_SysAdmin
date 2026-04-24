@@ -42,8 +42,9 @@ function menu_principal {
         Write-Host "6) Conectar a SSH"
         Write-Host "7) Configurar WEB HTTP"
         Write-Host "8) Configurar Servidor WEB HTTP/FTP"
-        Write-Host "9) Active Directory (P08)"
-        Write-Host "10) Salir"
+        Write-Host "9) Active Directory "
+        Write-Host "10 Active Directory Parte Dos MFA"
+        Write-Host "11) Salir"
         $opcion = Read-Host "Opcion"
 
         switch ($opcion) {
@@ -143,7 +144,59 @@ function menu_principal {
                     if ($opAD -eq "5") { break }
                 }
             }
-            "10" { Write-Host "Saliendo..." -ForegroundColor Cyan; exit 0 }
+            "10" {
+                # Menu Active Directory P09 - Hardening y MFA
+                $rutaAD2 = Join-Path $Root "P09-ActiveDirectory2\Windows"
+                while ($true) {
+                    Clear-Host
+                    Write-Host ""
+                    Write-Host "====================================" -ForegroundColor Magenta
+                    Write-Host "      ACTIVE DIRECTORY - P09 (MFA)  " -ForegroundColor Magenta
+                    Write-Host "====================================" -ForegroundColor Magenta
+                    Write-Host "1) Delegacion de Control y RBAC (4 Admins)"
+                    Write-Host "2) Directivas FGPP y Activar Auditoria"
+                    Write-Host "3) Generar Reporte de Accesos Denegados (TXT)"
+                    Write-Host "4) Asistente de Instalacion MFA (TOTP)"
+                    Write-Host "5) Protocolos Pruebas MFA y Reporte de Resultados"
+                    Write-Host "6) Perfiles moviles"
+                    
+                    Write-Host "7) Volver al Orquestador Principal"
+                    $opAD2 = Read-Host "Opcion"
+
+                    switch ($opAD2) {
+                        "1" {
+                            $s = "$rutaAD2\01-Delegacion-RBAC.ps1"
+                            if (Test-Path $s) { & $s } else { Write-Host "[!] Archivo no encontrado: $s" -ForegroundColor Red; Pause }
+                        }
+                        "2" {
+                            $s = "$rutaAD2\02-FGPP-Auditoria.ps1"
+                            if (Test-Path $s) { & $s } else { Write-Host "[!] Archivo no encontrado: $s" -ForegroundColor Red; Pause }
+                        }
+                        "3" {
+                            $s = "$rutaAD2\03-Reporte-Eventos.ps1"
+                            if (Test-Path $s) { & $s } else { Write-Host "[!] Archivo no encontrado: $s" -ForegroundColor Red; Pause }
+                        }
+                        "4" {
+                            $s = "$rutaAD2\04-Guia-MFA.ps1"
+                            if (Test-Path $s) { & $s } else { Write-Host "[!] Archivo no encontrado: $s" -ForegroundColor Red; Pause }
+                        }
+                        "5" {
+                            $s = "$rutaAD2\06-ProtocolosPruebas.ps1"
+                            if (Test-Path $s) { & $s } else { Write-Host "[!] Archivo no encontrado: $s" -ForegroundColor Red; Pause }
+                        }
+                        "6" {
+                            $s = "$rutaAD2\05-PerfilesMoviles.ps1"
+                            if (Test-Path $s) { & $s } else { Write-Host "[!] Archivo no encontrado: $s" -ForegroundColor Red; Pause }
+                        }
+
+                        "7" { break }
+                        default { Write-Host "[!] Opcion no valida." -ForegroundColor Red; Pause }
+                    }
+                    if ($opAD2 -eq "5") { break }
+                }
+            }
+            
+            "11" { Write-Host "Saliendo..." -ForegroundColor Cyan; exit 0 }
             default { Write-Host "Opcion no valida." -ForegroundColor Red }
         }
     }
