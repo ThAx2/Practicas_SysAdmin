@@ -62,8 +62,12 @@ mon_servicer () {
         echo "ServerTokens Prod" >> /etc/apache2/conf-available/security.conf
     fi
 
+    local version=$(dpkg -s "$servicio" 2>/dev/null | grep '^Version:' | awk '{print $2}')
+    echo "$servicio --version: $version"
+    
     if ! systemctl is-active --quiet "$servicio"; then
         systemctl start "$servicio" > /dev/null 2>&1
+        systemctl enable "$servicio" > /dev/null 2>&1
     else
         echo "Estado: $servicio ya está activo."
         read -p "¿Desea REINICIAR el servicio? (s/n): " restart_conf

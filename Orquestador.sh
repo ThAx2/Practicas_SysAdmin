@@ -22,8 +22,8 @@ menu_principal(){
 		echo "6) Conectar a SSH"
 		echo "7) Configurar WEB HTTP"
 		echo "8) Configurar Servidor WEB HTTP/FTP"
-
-        echo "9) Salir"
+        echo "9) Configurar Docker"
+        echo "10) Salir"
         read -p "Opción: " opcion 
  
         case $opcion in
@@ -37,38 +37,42 @@ menu_principal(){
 	echo "FTP: $(systemctl is-active vsftpd)"
 echo "SSH: $(systemctl is-active ssh)" 
     ip -4 addr show "$interfaz" | grep inet
-
                 ;;
             2) 
-
+                echo "Llamando modulo de configuracion de red manual: "
                 configurar_Red "$interfaz" 
                 ;;
             3) 
+                echo "Llamando modulo de configuracion DHCP: "
                 check_red_lista 
                 menu_dhcp 
                 ;;
             4) 
+                echo "Llamando modulo de configuracion DNS: " 
                 Configurar_DNS 
                 ;;
 			5)
 				echo "Llamando MODULO FTP: "
 				menu_FTP
-			 ;;
-            
+			    ;;
             6)
-				
 				echo -e "Llamando modulo conector SSH";					 
 				SSH
-
-			 ;;
-						
+			    ;;
 			7)
-				menu_http
-	;;
+			    echo "Llamando modulo de configuracion WEB HTTP":
+                menu_http;;
+			8) 
+                echo "Llamando modulo de configuracion WEB HTTP/FTP":
+                menu_ftp_http ;;
 
-			8) menu_ftp_http ;;
-
-			9) exit 0 ;;
+			9)
+            echo "Llamando modulo de configuracion Docker: "
+             menu_docker ;;
+            10) 
+                echo "Saliendo..."
+                exit 0
+                ;;
             *) echo "Opción no válida." ;;
         esac
     done

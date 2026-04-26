@@ -24,7 +24,7 @@ cargar_dependencias() {
     [ -f "$RAIZ/P05-FTP/Linux/FTP_Service.sh" ]   && source "$RAIZ/P05-FTP/Linux/FTP_Service.sh"
     [ -f "$RAIZ/P06-HTTP/Linux/HTTP.sh" ]          && source "$RAIZ/P06-HTTP/Linux/HTTP.sh"
     [ -f "$RAIZ/P07-HTTP-FTP/Linux/HTTP_FTP.sh" ]  && source "$RAIZ/P07-HTTP-FTP/Linux/HTTP_FTP.sh"
-
+    [ -f "$RAIZ/P10-Dockers/Linux/Dockers.sh" ]      && source "$RAIZ/P10-Dockers/Linux/Dockers.sh"
     # 4. Detección de Interfaces
     echo -e "\n[*] Detectando interfaces de red disponibles..."
     mapfile -t interfaces < <(ip -o link show | awk -F': ' '{print $2}' | grep -v "lo")
